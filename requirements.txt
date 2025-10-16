@@ -5,11 +5,11 @@ uvicorn
 # ---- Database ----
 sqlmodel
 sqlalchemy
-psycopg2-binary   # PostgreSQL driver
+psycopg2-binary
 
 # ---- Data Validation & Settings ----
 pydantic
-email-validator    # fixes your ImportError for EmailStr in schemas/config
+email-validator
 
 # ---- Authentication & Security ----
 python-jose[cryptography]
@@ -19,12 +19,5 @@ bcrypt
 # ---- Environment Management ----
 python-dotenv
 
-# ---- Email Service ----
-smtplib            # built-in, no need to install (comes with Python)
-email-validator    # already mentioned, but required for EmailStr fields
-
-# ---- Date/Time Utilities ----
-python-multipart   # for handling form data (if you ever add file uploads)
-
 # ---- Deployment Utilities ----
-gunicorn           # for production (used with Docker)
+gunicorn
