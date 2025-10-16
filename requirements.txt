@@ -1,12 +1,30 @@
-fastapi==0.104.1
-uvicorn==0.24.0
-sqlmodel==0.0.14
-python-jose[cryptography]==3.3.0
-passlib[bcrypt]==1.7.4
-python-multipart==0.0.6
-python-dotenv==1.0.0
-aiosmtplib==2.0.2
-psycopg[binary]
-alembic==1.11.1
-gunicorn==21.2.0
-psycopg2-binary
+# ---- Core Framework ----
+fastapi
+uvicorn
+
+# ---- Database ----
+sqlmodel
+sqlalchemy
+psycopg2-binary   # PostgreSQL driver
+
+# ---- Data Validation & Settings ----
+pydantic
+email-validator    # fixes your ImportError for EmailStr in schemas/config
+
+# ---- Authentication & Security ----
+python-jose[cryptography]
+passlib[bcrypt]
+bcrypt
+
+# ---- Environment Management ----
+python-dotenv
+
+# ---- Email Service ----
+smtplib            # built-in, no need to install (comes with Python)
+email-validator    # already mentioned, but required for EmailStr fields
+
+# ---- Date/Time Utilities ----
+python-multipart   # for handling form data (if you ever add file uploads)
+
+# ---- Deployment Utilities ----
+gunicorn           # for production (used with Docker)
