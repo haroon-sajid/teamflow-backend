@@ -6,6 +6,7 @@ uvicorn
 sqlmodel
 sqlalchemy
 psycopg2-binary
+psycopg[binary]
 
 # ---- Data Validation & Settings ----
 pydantic
