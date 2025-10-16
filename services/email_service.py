@@ -153,42 +153,35 @@
 
 
 
-
-
-
 # services/email_service.py
 import os
 import logging
 from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class EmailService:
     def __init__(self):
-        self.api_key = os.getenv("SENDGRID_API_KEY")
+        self.sendgrid_api_key = os.getenv("SENDGRID_API_KEY")
         self.sender_email = os.getenv("MAIL_FROM")
-        self.enabled = bool(self.api_key and self.sender_email)
-
+        self.enabled = bool(self.sendgrid_api_key and self.sender_email)
         if not self.enabled:
-            logger.warning("📧 Email service not configured. Set SENDGRID_API_KEY and MAIL_FROM environment variables.")
+            logger.warning("Email service not configured. SendGrid API key or MAIL_FROM missing.")
         else:
-            logger.info(f"📧 Email service configured for: {self.sender_email}")
+            logger.info(f"Email service configured with SendGrid from {self.sender_email}")
 
     async def send_invitation_email(self, to_email: str, invitation_link: str, role: str, invited_by: str = "Admin") -> bool:
         if not self.enabled:
-            logger.info(f"📧 Email service not configured. Would send invitation to {to_email}")
-            logger.info(f"📧 Invitation link: {invitation_link}")
+            logger.info(f"Would send email to {to_email} (SendGrid not configured).")
             return True
 
         subject = f"🎉 You're invited to join TeamFlow as {role.title()}!"
         html_content = f"""
-        <h2>Hello!</h2>
-        <p>You've been invited by <strong>{invited_by}</strong> to join TeamFlow as a <strong>{role.title()}</strong>.</p>
-        <p>Click here to accept the invitation:</p>
-        <a href="{invitation_link}">{invitation_link}</a>
-        <p>This link will expire in 7 days.</p>
+        <p>Hello!</p>
+        <p>{invited_by} has invited you to join TeamFlow as <strong>{role.title()}</strong>.</p>
+        <p>Click here to accept: <a href="{invitation_link}">Accept Invitation</a></p>
+        <p>Invitation expires in 7 days.</p>
         """
 
         try:
@@ -198,13 +191,12 @@ class EmailService:
                 subject=subject,
                 html_content=html_content
             )
-            sg = SendGridAPIClient(self.api_key)
+            sg = SendGridAPIClient(self.sendgrid_api_key)
             response = sg.send(message)
-            logger.info(f"✅ Invitation email sent to {to_email}, Status: {response.status_code}")
+            logger.info(f"Email sent to {to_email}, status code: {response.status_code}")
             return True
         except Exception as e:
-            logger.error(f"❌ Failed to send email to {to_email}: {str(e)}")
+            logger.error(f"Failed to send email to {to_email}: {e}")
             return False
 
-# Global instance
 email_service = EmailService()
