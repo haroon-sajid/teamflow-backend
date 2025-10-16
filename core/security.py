@@ -20,22 +20,38 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24 hours
 # ========================================
 # 🔐 Password Hashing
 # ========================================
+# pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
+# def hash_password(password: str) -> str:
+#     """Hash a plain password for storing in the database."""
+#     if len(password) > 72:
+#         password = password[:72]  # bcrypt max length
+#     return pwd_context.hash(password)
+
+# def verify_password(plain_password: str, hashed_password: str) -> bool:
+#     """Verify a plain password against the hashed one."""
+#     if len(plain_password) > 72:
+#         plain_password = plain_password[:72]
+#     return pwd_context.verify(plain_password, hashed_password)
+
+
+
+import hashlib
 from passlib.context import CryptContext
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 def hash_password(password: str) -> str:
-    """Hash a password safely (bcrypt max 72 bytes)."""
-    password_bytes = password.encode("utf-8")[:72]  # truncate by bytes, not chars
-    safe_password = password_bytes.decode("utf-8", errors="ignore")
-    return pwd_context.hash(safe_password)
+    # Step 1: normalize any-length password using SHA256
+    password_bytes = password.encode("utf-8")
+    sha256_digest = hashlib.sha256(password_bytes).hexdigest()
+
+    # Step 2: bcrypt hash the digest
+    return pwd_context.hash(sha256_digest)
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    plain_bytes = plain_password.encode("utf-8")[:72]
-    safe_password = plain_bytes.decode("utf-8", errors="ignore")
-    return pwd_context.verify(safe_password, hashed_password)
-
+    plain_digest = hashlib.sha256(plain_password.encode("utf-8")).hexdigest()
+    return pwd_context.verify(plain_digest, hashed_password)
 
 
 # ========================================
