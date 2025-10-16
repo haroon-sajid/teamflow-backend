@@ -1,0 +1,77 @@
+# --------------------------------------
+# Python & FastAPI Backend Ignore Rules
+# --------------------------------------
+
+# Virtual environments
+venv/
+env/
+.venv/
+ENV/
+
+# Environment & config files (Sensitive)
+.env
+.env.local
+.env.*
+*.secret
+*.key
+
+# __pycache__ and compiled files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pdb
+*.so
+
+# Logs and debug files
+*.log
+logs/
+debug.log
+
+# Editor and IDE settings
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Pytest and coverage
+.coverage
+.tox/
+.pytest_cache/
+htmlcov/
+.cache/
+
+# Build and distribution folders
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Temporary or local data
+tmp/
+temp/
+data/
+uploads/
+instance/
+backup/
+
+# Docker and deployment
+docker-compose.override.yml
+.dockerignore
+*.bak
+
+# --------------------------------
+# KEEP these (Production-relevant)
+# -------------------------------
+!main.py
+!requirements.txt
+!README.md
+!core/
+!models/
+!routes/
+!schemas/
+!services/
