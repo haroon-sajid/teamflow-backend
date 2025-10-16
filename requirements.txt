@@ -15,6 +15,7 @@ email-validator
 python-jose[cryptography]
 bcrypt>=4.1.2
 passlib[bcrypt]>=1.7.4
+argon2-cffi
 
 # ---- Environment Management ----
 python-dotenv
