@@ -69,6 +69,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan, title="TeamFlow App Backend")
 
 allowed_origins = [
+    "https://teamflow-frontend-omega.vercel.app/",
     "http://localhost:5173",  # Your Vite dev server
     "http://127.0.0.1:5173",  # Alternative localhost format
     # Add other origins if needed, e.g., production URL
@@ -104,3 +105,8 @@ def health_check():
 @app.get("/")
 def read_root():
     return {"message": "Welcome to TeamFlow Backend!"}
+
+
+
+
+
