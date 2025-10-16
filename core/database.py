@@ -1,6 +1,10 @@
 from sqlmodel import SQLModel, create_engine, Session
 from typing import Generator
+from dotenv import load_dotenv
 import os
+
+# Load environment variables from .env
+load_dotenv()
 
 # Use env DATABASE_URL with fallback to local sqlite
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./teamflow.db")
