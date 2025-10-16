@@ -69,16 +69,15 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan, title="TeamFlow App Backend")
 
 allowed_origins = [
-    "https://teamflow-frontend-omega.vercel.app/",
-    "http://localhost:5173",  # Your Vite dev server
-    "http://127.0.0.1:5173",  # Alternative localhost format
-    # Add other origins if needed, e.g., production URL
-    # "https://yourproductiondomain.com"
+    "https://teamflow-frontend-omega.vercel.app",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
 ]
+
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allowed_origins, #
+    allow_origins=allowed_origins, 
     allow_credentials=True,
     allow_methods=["*"], # Allows all methods (GET, POST, PUT, DELETE, etc.)
     allow_headers=["*"], # Allows all headers
