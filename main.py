@@ -21,7 +21,7 @@ users_router = APIRouter(prefix="/users", tags=["Users"])
 
 
 # ============================================================================
-#   GET ALL USERS
+#  ✅ GET ALL USERS
 # ============================================================================
 
 @users_router.get("/", response_model=list[User ])
@@ -34,7 +34,7 @@ def get_all_users(
     return users
 
 # ============================================================================
-#   GET USERS
+#  ✅ GET USERS
 # ============================================================================
 @users_router.get("/{user_id}", response_model=User )
 def get_user(
@@ -63,7 +63,7 @@ async def lifespan(app: FastAPI):
 
 
 # ============================================================================
-#   CORSMiddleware Configuration
+#  ✅ CORSMiddleware Configuration
 # ============================================================================
 
 app = FastAPI(lifespan=lifespan, title="TeamFlow App Backend")
@@ -84,7 +84,7 @@ app.add_middleware(
 )
 
 # ============================================================================
-#   INCLUDE ROUTERS AFTER CORS
+#  ✅ INCLUDE ROUTERS AFTER CORS
 # ============================================================================
 app.include_router(auth_router, prefix="/auth", tags=["Authentication"])
 app.include_router(project_router, prefix="/projects", tags=["Projects"])
@@ -94,7 +94,7 @@ app.include_router(invitation_router, prefix="/auth", tags=["Invitations"])
 
 
 # ============================================================================
-#   HEALTH CHECK ROUTE
+#  ✅ HEALTH CHECK ROUTE
 # ============================================================================
 @app.get("/health")
 def health_check():

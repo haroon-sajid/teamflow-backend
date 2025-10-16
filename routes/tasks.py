@@ -13,7 +13,7 @@ router = APIRouter(tags=["Tasks"])
 
 
 # ============================================================================
-#  Helper function to check if user is assigned to task
+#  ✅ Helper function to check if user is assigned to task
 # ============================================================================
 def _is_user_assigned_to_task(session: Session, user_id: int, task_id: int) -> bool:
     assignment = session.exec(
@@ -26,7 +26,7 @@ def _is_user_assigned_to_task(session: Session, user_id: int, task_id: int) -> b
 
 
 # ============================================================================
-#  Create New Task with Organization
+#  ✅ Create New Task with Organization
 # ============================================================================
 @router.post("/", response_model=TaskOut, status_code=201)
 def create_task(
@@ -151,7 +151,7 @@ def create_task(
 
 
 # ============================================================================
-#  Get All Tasks (Organization-scoped)
+#  ✅ Get All Tasks (Organization-scoped)
 # ============================================================================
 @router.get("/", response_model=List[TaskOut])
 def get_tasks(
@@ -226,7 +226,7 @@ def get_tasks(
 
 
 # ============================================================================
-#  Get Single Task
+#  ✅ Get Single Task
 # ============================================================================
 @router.get("/{task_id}", response_model=TaskOut)
 def get_task(
@@ -297,7 +297,7 @@ def get_task(
 
 
 # ============================================================================
-#   Update Task
+#   ✅ Update Task
 # ============================================================================
 
 @router.put("/{task_id}", response_model=TaskOut)
@@ -414,7 +414,7 @@ def update_task(
 
 
 # ============================================================================
-#   Delete Task
+#   ✅ Delete Task
 # ============================================================================
 @router.delete("/{task_id}", status_code=204)
 def delete_task(
@@ -467,7 +467,7 @@ def delete_task(
 
 
 # ============================================================================
-#  Member: Update task status only
+#  ✅ Member: Update task status only
 # ============================================================================
 @router.patch("/{task_id}/status", response_model=TaskOut)
 def update_task_status(
@@ -532,7 +532,7 @@ def update_task_status(
 
 
 # ============================================================================
-#  Task Comments
+#  ✅ GET TASL COMMENTS
 # ============================================================================
 @router.get("/{task_id}/comments", response_model=List[CommentOut])
 def get_task_comments(
@@ -590,9 +590,9 @@ def get_task_comments(
     return enhanced_comments
 
 
-# --------------------------------------------------------
-#   CREATE TASK COMMENTS
-# --------------------------------------------------------
+# ============================================================================
+#  ✅ CREATE TASK COMMENTS
+# ============================================================================
 @router.post("/{task_id}/comments", response_model=CommentOut, status_code=201)
 def create_task_comment(
     task_id: int,
@@ -645,9 +645,8 @@ def create_task_comment(
 
 
 # ============================================================================
-#  Task Work Logs
+# ✅ GET TASK WORK LOGS
 # ============================================================================
-
 @router.get("/{task_id}/worklogs", response_model=List[WorkLogOut])
 def get_task_work_logs(
     task_id: int,
@@ -706,9 +705,9 @@ def get_task_work_logs(
     return enhanced_work_logs
 
 
-# --------------------------------------------------------
-#   CREATE Task Work Logs
-# --------------------------------------------------------
+# ============================================================================
+# ✅ CREATE TASK WORK LOGS
+# ============================================================================
 @router.post("/{task_id}/worklogs", response_model=WorkLogOut, status_code=201)
 def create_task_work_log(
     task_id: int,
@@ -769,7 +768,7 @@ def create_task_work_log(
 
 
 # ============================================================================
-#   Toggle Task Permission
+#  ✅ Toggle Task Permission
 # ============================================================================
 @router.patch("/{task_id}/permission", response_model=TaskOut)
 def toggle_task_permission(
@@ -834,10 +833,9 @@ def toggle_task_permission(
     )
 
 
-
-# --------------------------------------------------------
-#   Update Task Status (Member Safe) status-only patch (admins + assigned members)
-# --------------------------------------------------------
+# ============================================================================
+#  ✅ Update Task Status (admins + assigned members)
+# ============================================================================
 @router.patch("/{task_id}/status", response_model=TaskOut)
 def update_task_status(
     task_id: int,

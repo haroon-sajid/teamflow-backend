@@ -15,18 +15,31 @@ from core.security import (
 
 router = APIRouter(tags=["Authentication"])
 
-def generate_slug(name: str) -> str:
-    """Generate a URL-safe slug from organization name"""
-    slug = name.lower()
-    slug = re.sub(r'[^a-z0-9\s-]', '', slug)  # Remove special chars
-    slug = re.sub(r'\s+', '-', slug)  # Replace spaces with hyphens
-    slug = re.sub(r'-+', '-', slug)  # Remove multiple hyphens
-    slug = slug.strip('-')  # Remove leading/trailing hyphens
-    return slug[:50]  # Limit to 50 characters
 
-# --------------------------------------------------------
+# ==================================================================
+# ✅ GENERATE SLUG
+# ================================================================== 
+def generate_slug(name: str) -> str:
+    """
+    Generate a clean, URL-safe slug from an organization name.
+    
+    This function normalizes the input string by converting it to lowercase,
+    removing special characters, replacing spaces with hyphens, and trimming
+    extra or trailing hyphens. The resulting slug is suitable for use in URLs
+    or unique organization identifiers and is limited to 50 characters.
+    """
+    slug = name.lower()
+    slug = re.sub(r'[^a-z0-9\s-]', '', slug)  # Remove special characters
+    slug = re.sub(r'\s+', '-', slug)  # Replace spaces with hyphens
+    slug = re.sub(r'-+', '-', slug)  # Collapse multiple hyphens
+    slug = slug.strip('-')  # Trim leading/trailing hyphens
+    return slug[:50]  # Limit slug length to 50 characters
+
+
+# ==================================================================
 #  ✅ SIGNUP ROUTE WITH PROPER ERROR HANDLING
-# --------------------------------------------------------
+# ================================================================== 
+
 @router.post("/signup")
 def public_signup(user_data: UserCreate, session: Session = Depends(get_session)):
     """Public signup - user becomes Admin and creates their organization"""
@@ -126,9 +139,9 @@ def public_signup(user_data: UserCreate, session: Session = Depends(get_session)
         )
 
 
-# --------------------------------------------------------
-# ✅ LOGIN ROUTE
-# --------------------------------------------------------
+# ==================================================================
+#  ✅ LOGIN ROUTE
+# ================================================================== 
 @router.post("/login")
 def login(user: UserLogin, session: Session = Depends(get_session)):
     try:
@@ -192,9 +205,9 @@ def login(user: UserLogin, session: Session = Depends(get_session)):
             detail=f"Login failed: {str(e)}"
         )
 
-# --------------------------------------------------------
-# ✅ GET CURRENT USER ENDPOINT
-# --------------------------------------------------------
+# ==================================================================
+#  ✅ GET CURRENT USER ENDPOINT
+# ================================================================== 
 @router.get("/me", response_model=UserRead)
 def get_current_user_endpoint(current_user: User = Depends(get_current_user)):
     """Get current user info from JWT token"""

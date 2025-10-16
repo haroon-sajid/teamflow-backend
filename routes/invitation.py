@@ -15,9 +15,9 @@ router = APIRouter(tags=["Invitations"])
 
 
 
-# -------------------------------------------------------------------------------------------------
-#  ✅ SEND INVITE EMAIL
-# -------------------------------------------------------------------------------------------------
+# ==================================================================
+# ✅ SEND INVITE EMAIL
+# ================================================================== 
 async def send_invite_email_sync(email_to: str, token: str, role: str, invited_by: str = "Admin"):
     """Send beautiful HTML invitation email using our custom email service"""
     frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
@@ -36,9 +36,10 @@ async def send_invite_email_sync(email_to: str, token: str, role: str, invited_b
         print(f" Error sending email: {e}")
         return False
 
-# ---------------------------------------------------------------------------------------------------
-#  ✅ CREATE INVITATOIN REQUEST 
-# ---------------------------------------------------------------------------------------------------
+
+# ==================================================================
+# ✅ CREATE INVITATOIN REQUEST 
+# ================================================================== 
 @router.post("/invitations", response_model=dict)
 async def invite(
     invite: InvitationCreate,
@@ -116,9 +117,10 @@ async def invite(
     }
 
 
-# ---------------------------------------------------------------------------------------------------
-#  ✅ ACCEPT EMAIL INVITATION REQUEST | # Changed path to match frontend
-# ---------------------------------------------------------------------------------------------------
+# =====================================================================
+#  ✅ ACCEPT EMAIL INVITATION REQUEST | Changed path to match frontend
+# =====================================================================
+
 @router.post("/invitations/accept", response_model=dict) 
 def accept_invite(
     data: AccountActivate,
@@ -191,9 +193,9 @@ def accept_invite(
     }
 
 
-# -----------------------------------------------------------------------------------------------------
-#  ✅ VALIDATE INVITATION TOKEN
-# -----------------------------------------------------------------------------------------------------
+# ==================================================================
+# ✅ VALIDATE INVITATION TOKEN
+# ================================================================== 
 @router.get("/invitations/validate/{token}")
 def validate_invitation(token: str, session: Session = Depends(get_session)):
     """Validate an invitation token"""
@@ -242,9 +244,9 @@ def get_my_invitations(
         for invite in invitations
     ]
 
-# --------------------------------------------------------------------------------------------------------
-#  ✅ GET ALL MEMBERS OF CURRENT ORGANIZATOIN
-# --------------------------------------------------------------------------------------------------------
+# ==================================================================
+# ✅ GET ALL MEMBERS OF CURRENT ORGANIZATOIN
+# ================================================================== 
 @router.get("/organization-members", response_model=list[dict])
 def get_organization_members(
     current_user: User = Depends(get_current_user),
@@ -272,9 +274,9 @@ def get_organization_members(
     ]
 
 
-# ---------------------------------------------------------------------------------------------------------
-#  ✅ RESEND EMAIL INVITATION REQUEST
-# ---------------------------------------------------------------------------------------------------------
+# ==================================================================
+# ✅ RESEND EMAIL INVITATION REQUEST
+# ================================================================== 
 @router.post("/invitations/resend/{email}", response_model=dict)
 async def resend_invitation(
     email: str,
@@ -338,9 +340,9 @@ async def resend_invitation(
     }
 
 
-# ---------------------------------------------------------------------------------------------------------
+# ==================================================================
 #  ✅ REVOKE EMAIL INVITATION REQUEST 
-# ----------------------------------------------------------------------------------------------------------
+# ================================================================== 
 @router.delete("/invitations/{invitation_id}", response_model=dict)
 def revoke_invitation(
     invitation_id: int,
@@ -380,13 +382,9 @@ def revoke_invitation(
 
 
 
-
-
-
-
-# ============================================================================
-#   REMOVE MEMBER FROM ORGANIZATION
-# ============================================================================
+# ==================================================================
+#  ✅ REMOVE MEMBER FROM ORGANIZATION
+# ==================================================================
 
 @router.delete("/members/{user_id}", status_code=200)
 def remove_member_from_organization(

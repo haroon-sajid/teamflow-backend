@@ -1,24 +1,3 @@
-# from pydantic import BaseModel
-# from typing import Optional
-# from datetime import datetime
-
-# class ProjectCreate(BaseModel):
-#     name: str
-#     description: Optional[str] = None
-
-# class ProjectRead(BaseModel):
-#     id: int
-#     name: str
-#     description: Optional[str] = None
-#     creator_id: int  #  ADD creator_id to response
-#     created_at: datetime
-
-#     model_config = {"from_attributes": True}
-
-
-
-
-
 # schemas/project_schema.py
 from pydantic import BaseModel, Field
 from typing import Optional
