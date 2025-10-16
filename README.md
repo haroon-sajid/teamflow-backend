@@ -41,12 +41,12 @@ Built with **FastAPI** and **SQLModel**, it ensures high performance, maintainab
 ## 🔹 Folder Structure
 
 ```
-
 backend/
 ├── main.py
 ├── core/
 │   ├── database.py
-│   └── security.py
+│   ├── security.py
+│   └── config.py
 ├── models/
 │   └── models.py
 ├── schemas/
@@ -65,7 +65,11 @@ backend/
 ├── services/
 │   └── email_service.py
 ├── requirements.txt
-└── .env
+├── Dockerfile
+├── docker-compose.yml
+├── wait-for-db.sh
+├── .env
+└── .env.example
 
 ````
 
