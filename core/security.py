@@ -20,19 +20,20 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24 hours
 # ========================================
 # 🔐 Password Hashing
 # ========================================
+
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 def hash_password(password: str) -> str:
     """Hash a plain password for storing in the database."""
-    if len(password) > 72:
-        password = password[:72]  # bcrypt max length
-    return pwd_context.hash(password)
+    # bcrypt has a 72-byte limit, not 72 characters
+    safe_password = password.encode("utf-8")[:72].decode("utf-8", errors="ignore")
+    return pwd_context.hash(safe_password)
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Verify a plain password against the hashed one."""
-    if len(plain_password) > 72:
-        plain_password = plain_password[:72]
-    return pwd_context.verify(plain_password, hashed_password)
+    safe_password = plain_password.encode("utf-8")[:72].decode("utf-8", errors="ignore")
+    return pwd_context.verify(safe_password, hashed_password)
+
 
 # ========================================
 # 🔑 JWT Token Generation & Verification
