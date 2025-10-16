@@ -836,62 +836,62 @@ def toggle_task_permission(
 # ============================================================================
 #  ✅ Update Task Status (admins + assigned members)
 # ============================================================================
-@router.patch("/{task_id}/status", response_model=TaskOut)
-def update_task_status(
-    task_id: int,
-    payload: dict,                       # { "status": "In Progress" }
-    current_user: User = Depends(get_current_user),
-    session: Session = Depends(get_session)
-):
-    task = session.get(Task, task_id)
-    if not task:
-        raise HTTPException(404, "Task not found")
+# @router.patch("/{task_id}/status", response_model=TaskOut)
+# def update_task_status(
+#     task_id: int,
+#     payload: dict,                       # { "status": "In Progress" }
+#     current_user: User = Depends(get_current_user),
+#     session: Session = Depends(get_session)
+# ):
+#     task = session.get(Task, task_id)
+#     if not task:
+#         raise HTTPException(404, "Task not found")
 
-    # organization check
-    if task.organization_id != current_user.organization_id:
-        raise HTTPException(403, "No access to this task")
+#     # organization check
+#     if task.organization_id != current_user.organization_id:
+#         raise HTTPException(403, "No access to this task")
 
-    # members must be assigned
-    if current_user.role == UserRole.MEMBER:
-        assigned = session.exec(
-            select(TaskMemberLink).where(
-                TaskMemberLink.task_id == task_id,
-                TaskMemberLink.user_id == current_user.id
-            )
-        ).first()
-        if not assigned:
-            raise HTTPException(403, "You are not assigned to this task")
+#     # members must be assigned
+#     if current_user.role == UserRole.MEMBER:
+#         assigned = session.exec(
+#             select(TaskMemberLink).where(
+#                 TaskMemberLink.task_id == task_id,
+#                 TaskMemberLink.user_id == current_user.id
+#             )
+#         ).first()
+#         if not assigned:
+#             raise HTTPException(403, "You are not assigned to this task")
 
-    # update only the status column
-    new_status = payload.get("status")
-    if not new_status:
-        raise HTTPException(400, "status field required")
+#     # update only the status column
+#     new_status = payload.get("status")
+#     if not new_status:
+#         raise HTTPException(400, "status field required")
 
-    task.status = new_status
-    session.commit()
-    session.refresh(task)
+#     task.status = new_status
+#     session.commit()
+#     session.refresh(task)
 
-    # build the same response shape the frontend expects
-    member_links = session.exec(
-        select(TaskMemberLink).where(TaskMemberLink.task_id == task.id)
-    ).all()
-    member_ids = [link.user_id for link in member_links]
-    members = session.exec(select(User).where(User.id.in_(member_ids))).all()
-    project = session.get(Project, task.project_id)
+#     # build the same response shape the frontend expects
+#     member_links = session.exec(
+#         select(TaskMemberLink).where(TaskMemberLink.task_id == task.id)
+#     ).all()
+#     member_ids = [link.user_id for link in member_links]
+#     members = session.exec(select(User).where(User.id.in_(member_ids))).all()
+#     project = session.get(Project, task.project_id)
 
-    return TaskOut(
-        id=task.id,
-        title=task.title,
-        description=task.description,
-        status=task.status,
-        priority=task.priority,
-        due_date=task.due_date,
-        project_id=task.project_id,
-        organization_id=task.organization_id,
-        allow_member_edit=task.allow_member_edit,
-        created_at=task.created_at,
-        member_ids=member_ids,
-        project_name=project.name if project else None,
-        member_names=[m.full_name for m in members],
-    )
+#     return TaskOut(
+#         id=task.id,
+#         title=task.title,
+#         description=task.description,
+#         status=task.status,
+#         priority=task.priority,
+#         due_date=task.due_date,
+#         project_id=task.project_id,
+#         organization_id=task.organization_id,
+#         allow_member_edit=task.allow_member_edit,
+#         created_at=task.created_at,
+#         member_ids=member_ids,
+#         project_name=project.name if project else None,
+#         member_names=[m.full_name for m in members],
+#     )
 
