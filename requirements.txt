@@ -6,7 +6,6 @@ uvicorn
 sqlmodel
 sqlalchemy
 psycopg2-binary
-psycopg[binary]
 
 # ---- Data Validation & Settings ----
 pydantic
@@ -14,8 +13,8 @@ email-validator
 
 # ---- Authentication & Security ----
 python-jose[cryptography]
-passlib[bcrypt]
-bcrypt
+bcrypt>=4.1.2
+passlib[bcrypt]>=1.7.4
 
 # ---- Environment Management ----
 python-dotenv
