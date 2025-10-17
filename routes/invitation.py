@@ -18,12 +18,35 @@ router = APIRouter(tags=["Invitations"])
 # ==================================================================
 # ✅ SEND INVITE EMAIL
 # ================================================================== 
+# async def send_invite_email_sync(email_to: str, token: str, role: str, invited_by: str = "Admin"):
+#     """Send beautiful HTML invitation email using our custom email service"""
+#     frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
+#     invitation_link = f"{frontend_url}/accept-invitation?token={token}"
+    
+#     # Use our custom email service - ✅ NOW USING CORRECT METHOD NAME
+#     try:
+#         success = await email_service.send_invitation_email(
+#             to_email=email_to,
+#             invitation_link=invitation_link,
+#             role=role,
+#             invited_by=invited_by
+#         )
+#         return success
+#     except Exception as e:
+#         print(f" Error sending email: {e}")
+#         return False
+
+
+
+import urllib.parse  # ✅ for URL-safe tokens
+
 async def send_invite_email_sync(email_to: str, token: str, role: str, invited_by: str = "Admin"):
     """Send beautiful HTML invitation email using our custom email service"""
     frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
-    invitation_link = f"{frontend_url}/accept-invitation?token={token}"
+    # URL-encode token
+    token_safe = urllib.parse.quote(token)
+    invitation_link = f"{frontend_url}/accept-invitation?token={token_safe}"
     
-    # Use our custom email service - ✅ NOW USING CORRECT METHOD NAME
     try:
         success = await email_service.send_invitation_email(
             to_email=email_to,
@@ -40,6 +63,84 @@ async def send_invite_email_sync(email_to: str, token: str, role: str, invited_b
 # ==================================================================
 # ✅ CREATE INVITATOIN REQUEST 
 # ================================================================== 
+# @router.post("/invitations", response_model=dict)
+# async def invite(
+#     invite: InvitationCreate,
+#     background_tasks: BackgroundTasks,
+#     current_user: User = Depends(get_current_admin),
+#     session: Session = Depends(get_session)
+# ):
+#     """
+#     Send an invitation to a new user via email.
+#     Only Admins can call this.
+#     """
+#     # Check if user already exists
+#     existing = session.exec(select(User).where(User.email == invite.email)).first()
+#     if existing:
+#         raise HTTPException(status_code=400, detail="User already exists")
+
+#     # Check if there's already a pending invitation
+#     existing_invite = session.exec(
+#         select(Invitation).where(
+#             Invitation.email == invite.email,
+#             Invitation.accepted == False,
+#             Invitation.expires_at > datetime.utcnow()
+#         )
+#     ).first()
+    
+#     if existing_invite:
+#         raise HTTPException(
+#             status_code=400, 
+#             detail="Pending invitation already exists for this email."
+#         )
+
+#     # Create token for the invitation
+#     token = secrets.token_urlsafe(32)
+#     expires = datetime.utcnow() + timedelta(days=7)
+
+#     # Try to send email FIRST before storing in database
+#     email_sent = await send_invite_email_sync(
+#         invite.email, 
+#         token, 
+#         invite.role,
+#         current_user.full_name or current_user.email
+#     )
+    
+#     if not email_sent:
+#         raise HTTPException(
+#             status_code=500, 
+#             detail="Failed to send invitation email. Please check your email configuration."
+#         )
+
+#     # Create new invitation with organization info
+#     invitation = Invitation(
+#         email=invite.email,
+#         token=token,
+#         role=invite.role,
+#         expires_at=expires,
+#         sent_by_id=current_user.id,
+#         organization_id=current_user.organization_id,  #  Attach organization
+#         accepted=False,
+#         created_at=datetime.utcnow()
+#     )
+#     session.add(invitation)
+#     session.commit()
+#     session.refresh(invitation)
+
+#     # Return invitation link for testing
+#     frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
+#     invitation_link = f"{frontend_url}/accept-invitation?token={token}"
+
+#     return {
+#         "message": "Invitation sent successfully!",
+#         "email": invite.email,
+#         "role": invite.role,
+#         "expires_at": invitation.expires_at.isoformat(),
+#         "invitation_link": invitation_link  # For testing
+#     }
+
+
+
 @router.post("/invitations", response_model=dict)
 async def invite(
     invite: InvitationCreate,
@@ -47,16 +148,10 @@ async def invite(
     current_user: User = Depends(get_current_admin),
     session: Session = Depends(get_session)
 ):
-    """
-    Send an invitation to a new user via email.
-    Only Admins can call this.
-    """
-    # Check if user already exists
     existing = session.exec(select(User).where(User.email == invite.email)).first()
     if existing:
         raise HTTPException(status_code=400, detail="User already exists")
 
-    # Check if there's already a pending invitation
     existing_invite = session.exec(
         select(Invitation).where(
             Invitation.email == invite.email,
@@ -66,16 +161,12 @@ async def invite(
     ).first()
     
     if existing_invite:
-        raise HTTPException(
-            status_code=400, 
-            detail="Pending invitation already exists for this email."
-        )
+        raise HTTPException(status_code=400, detail="Pending invitation already exists for this email.")
 
-    # Create token for the invitation
     token = secrets.token_urlsafe(32)
     expires = datetime.utcnow() + timedelta(days=7)
 
-    # Try to send email FIRST before storing in database
+    # Send email first
     email_sent = await send_invite_email_sync(
         invite.email, 
         token, 
@@ -84,19 +175,15 @@ async def invite(
     )
     
     if not email_sent:
-        raise HTTPException(
-            status_code=500, 
-            detail="Failed to send invitation email. Please check your email configuration."
-        )
+        raise HTTPException(status_code=500, detail="Failed to send invitation email.")
 
-    # Create new invitation with organization info
     invitation = Invitation(
         email=invite.email,
         token=token,
         role=invite.role,
         expires_at=expires,
         sent_by_id=current_user.id,
-        organization_id=current_user.organization_id,  #  Attach organization
+        organization_id=current_user.organization_id,
         accepted=False,
         created_at=datetime.utcnow()
     )
@@ -104,16 +191,16 @@ async def invite(
     session.commit()
     session.refresh(invitation)
 
-    # Return invitation link for testing
+    # Return URL-safe link
     frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
-    invitation_link = f"{frontend_url}/accept-invitation?token={token}"
+    invitation_link = f"{frontend_url}/accept-invitation?token={urllib.parse.quote(token)}"
 
     return {
         "message": "Invitation sent successfully!",
         "email": invite.email,
         "role": invite.role,
         "expires_at": invitation.expires_at.isoformat(),
-        "invitation_link": invitation_link  # For testing
+        "invitation_link": invitation_link
     }
 
 
@@ -196,11 +283,63 @@ def accept_invite(
 # ==================================================================
 # ✅ VALIDATE INVITATION TOKEN
 # ================================================================== 
+# @router.get("/invitations/validate/{token}")
+# def validate_invitation(token: str, session: Session = Depends(get_session)):
+#     """Validate an invitation token"""
+#     invitation = session.exec(
+#         select(Invitation).where(Invitation.token == token)
+#     ).first()
+
+#     if not invitation:
+#         raise HTTPException(status_code=400, detail="Invalid invitation token.")
+#     if invitation.accepted:
+#         raise HTTPException(status_code=400, detail="Invitation already accepted.")
+#     if datetime.utcnow() > invitation.expires_at:
+#         raise HTTPException(status_code=400, detail="Invitation has expired.")
+
+#     return {
+#         "valid": True,
+#         "email": invitation.email,
+#         "role": invitation.role,
+#         "organization_id": invitation.organization_id,  # ✅ Include organization_id
+#         "expires_at": invitation.expires_at.isoformat()
+#     }
+
+# # --- Get my sent invitations ---
+# @router.get("/my-invitations", response_model=list[dict])
+# def get_my_invitations(
+#     current_user: User = Depends(get_current_user),
+#     session: Session = Depends(get_session)
+# ):
+#     """Get invitations sent by current user"""
+#     invitations = session.exec(
+#         select(Invitation).where(Invitation.sent_by_id == current_user.id)
+#         .order_by(Invitation.created_at.desc())
+#     ).all()
+    
+#     return [
+#         {
+#             "id": invite.id,
+#             "email": invite.email,
+#             "role": invite.role,
+#             "status": "accepted" if invite.accepted else "pending",
+#             "created_at": invite.created_at.isoformat(),
+#             "expires_at": invite.expires_at.isoformat(),
+#             "organization_id": invite.organization_id,  # ✅ Include organization_id
+#             "accepted": invite.accepted
+#         }
+#         for invite in invitations
+#     ]
+
+
+
 @router.get("/invitations/validate/{token}")
 def validate_invitation(token: str, session: Session = Depends(get_session)):
-    """Validate an invitation token"""
+    import urllib.parse
+    token_safe = urllib.parse.unquote(token)  # ✅ decode token
+
     invitation = session.exec(
-        select(Invitation).where(Invitation.token == token)
+        select(Invitation).where(Invitation.token == token_safe)
     ).first()
 
     if not invitation:
@@ -214,35 +353,9 @@ def validate_invitation(token: str, session: Session = Depends(get_session)):
         "valid": True,
         "email": invitation.email,
         "role": invitation.role,
-        "organization_id": invitation.organization_id,  # ✅ Include organization_id
+        "organization_id": invitation.organization_id,
         "expires_at": invitation.expires_at.isoformat()
     }
-
-# --- Get my sent invitations ---
-@router.get("/my-invitations", response_model=list[dict])
-def get_my_invitations(
-    current_user: User = Depends(get_current_user),
-    session: Session = Depends(get_session)
-):
-    """Get invitations sent by current user"""
-    invitations = session.exec(
-        select(Invitation).where(Invitation.sent_by_id == current_user.id)
-        .order_by(Invitation.created_at.desc())
-    ).all()
-    
-    return [
-        {
-            "id": invite.id,
-            "email": invite.email,
-            "role": invite.role,
-            "status": "accepted" if invite.accepted else "pending",
-            "created_at": invite.created_at.isoformat(),
-            "expires_at": invite.expires_at.isoformat(),
-            "organization_id": invite.organization_id,  # ✅ Include organization_id
-            "accepted": invite.accepted
-        }
-        for invite in invitations
-    ]
 
 # ==================================================================
 # ✅ GET ALL MEMBERS OF CURRENT ORGANIZATOIN
@@ -277,6 +390,69 @@ def get_organization_members(
 # ==================================================================
 # ✅ RESEND EMAIL INVITATION REQUEST
 # ================================================================== 
+# @router.post("/invitations/resend/{email}", response_model=dict)
+# async def resend_invitation(
+#     email: str,
+#     background_tasks: BackgroundTasks,
+#     current_user: User = Depends(get_current_admin),
+#     session: Session = Depends(get_session)
+# ):
+#     """Resend invitation to an email that has a pending invitation."""
+#     # Find existing invitation for this email
+#     invitation = session.exec(
+#         select(Invitation).where(
+#             Invitation.email == email,
+#             Invitation.sent_by_id == current_user.id,
+#             Invitation.accepted == False,
+#             Invitation.expires_at > datetime.utcnow()
+#         )
+#     ).first()
+    
+#     if not invitation:
+#         raise HTTPException(
+#             status_code=404, 
+#             detail="No pending invitation found for this email."
+#         )
+
+#     # Create new token and expiration
+#     new_token = secrets.token_urlsafe(32)
+#     new_expires = datetime.utcnow() + timedelta(days=7)
+
+#     # Try to send email FIRST before updating database
+#     email_sent = await send_invite_email_sync(
+#         email, 
+#         new_token, 
+#         invitation.role,
+#         current_user.full_name or current_user.email
+#     )
+    
+#     if not email_sent:
+#         raise HTTPException(
+#             status_code=500, 
+#             detail="Failed to resend invitation email. Please check your email configuration."
+#         )
+
+#     # If email was sent successfully, update the invitation in database
+#     invitation.token = new_token
+#     invitation.expires_at = new_expires
+#     invitation.created_at = datetime.utcnow()  # Reset creation time
+    
+#     session.add(invitation)
+#     session.commit()
+
+#     # Return invitation link for testing
+#     frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
+#     invitation_link = f"{frontend_url}/accept-invitation?token={new_token}"
+
+#     return {
+#         "message": "Invitation resent successfully!",
+#         "email": email,
+#         "role": invitation.role,
+#         "expires_at": new_expires.isoformat(),
+#         "invitation_link": invitation_link
+#     }
+
+
 @router.post("/invitations/resend/{email}", response_model=dict)
 async def resend_invitation(
     email: str,
@@ -284,8 +460,6 @@ async def resend_invitation(
     current_user: User = Depends(get_current_admin),
     session: Session = Depends(get_session)
 ):
-    """Resend invitation to an email that has a pending invitation."""
-    # Find existing invitation for this email
     invitation = session.exec(
         select(Invitation).where(
             Invitation.email == email,
@@ -296,16 +470,11 @@ async def resend_invitation(
     ).first()
     
     if not invitation:
-        raise HTTPException(
-            status_code=404, 
-            detail="No pending invitation found for this email."
-        )
+        raise HTTPException(status_code=404, detail="No pending invitation found for this email.")
 
-    # Create new token and expiration
     new_token = secrets.token_urlsafe(32)
     new_expires = datetime.utcnow() + timedelta(days=7)
 
-    # Try to send email FIRST before updating database
     email_sent = await send_invite_email_sync(
         email, 
         new_token, 
@@ -314,22 +483,16 @@ async def resend_invitation(
     )
     
     if not email_sent:
-        raise HTTPException(
-            status_code=500, 
-            detail="Failed to resend invitation email. Please check your email configuration."
-        )
+        raise HTTPException(status_code=500, detail="Failed to resend invitation email.")
 
-    # If email was sent successfully, update the invitation in database
     invitation.token = new_token
     invitation.expires_at = new_expires
-    invitation.created_at = datetime.utcnow()  # Reset creation time
-    
+    invitation.created_at = datetime.utcnow()
     session.add(invitation)
     session.commit()
 
-    # Return invitation link for testing
     frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
-    invitation_link = f"{frontend_url}/accept-invitation?token={new_token}"
+    invitation_link = f"{frontend_url}/accept-invitation?token={urllib.parse.quote(new_token)}"
 
     return {
         "message": "Invitation resent successfully!",
