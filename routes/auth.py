@@ -212,4 +212,3 @@ def login(user: UserLogin, session: Session = Depends(get_session)):
 def get_current_user_endpoint(current_user: User = Depends(get_current_user)):
     """Get current user info from JWT token"""
     return current_user
-

@@ -13,39 +13,15 @@ from core.security import (hash_password, create_access_token, get_current_admin
 router = APIRouter(tags=["Invitations"])
 
 
-
-
 # ==================================================================
 # ✅ SEND INVITE EMAIL
 # ================================================================== 
-# async def send_invite_email_sync(email_to: str, token: str, role: str, invited_by: str = "Admin"):
-#     """Send beautiful HTML invitation email using our custom email service"""
-#     frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
-#     invitation_link = f"{frontend_url}/accept-invitation?token={token}"
-    
-#     # Use our custom email service - ✅ NOW USING CORRECT METHOD NAME
-#     try:
-#         success = await email_service.send_invitation_email(
-#             to_email=email_to,
-#             invitation_link=invitation_link,
-#             role=role,
-#             invited_by=invited_by
-#         )
-#         return success
-#     except Exception as e:
-#         print(f" Error sending email: {e}")
-#         return False
-
-
-
-import urllib.parse  # ✅ for URL-safe tokens
-
 async def send_invite_email_sync(email_to: str, token: str, role: str, invited_by: str = "Admin"):
     """Send beautiful HTML invitation email using our custom email service"""
     frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
-    # URL-encode token
-    token_safe = urllib.parse.quote(token)
-    invitation_link = f"{frontend_url}/accept-invitation?token={token_safe}"
+    # ⚠️ token from secrets.token_urlsafe() is ALREADY URL-safe — no need to quote!
+    invitation_link = f"{frontend_url}/accept-invitation?token={token}"
+    
     
     try:
         success = await email_service.send_invitation_email(
@@ -61,86 +37,8 @@ async def send_invite_email_sync(email_to: str, token: str, role: str, invited_b
 
 
 # ==================================================================
-# ✅ CREATE INVITATOIN REQUEST 
+# ✅ CREATE INVITATION REQUEST 
 # ================================================================== 
-# @router.post("/invitations", response_model=dict)
-# async def invite(
-#     invite: InvitationCreate,
-#     background_tasks: BackgroundTasks,
-#     current_user: User = Depends(get_current_admin),
-#     session: Session = Depends(get_session)
-# ):
-#     """
-#     Send an invitation to a new user via email.
-#     Only Admins can call this.
-#     """
-#     # Check if user already exists
-#     existing = session.exec(select(User).where(User.email == invite.email)).first()
-#     if existing:
-#         raise HTTPException(status_code=400, detail="User already exists")
-
-#     # Check if there's already a pending invitation
-#     existing_invite = session.exec(
-#         select(Invitation).where(
-#             Invitation.email == invite.email,
-#             Invitation.accepted == False,
-#             Invitation.expires_at > datetime.utcnow()
-#         )
-#     ).first()
-    
-#     if existing_invite:
-#         raise HTTPException(
-#             status_code=400, 
-#             detail="Pending invitation already exists for this email."
-#         )
-
-#     # Create token for the invitation
-#     token = secrets.token_urlsafe(32)
-#     expires = datetime.utcnow() + timedelta(days=7)
-
-#     # Try to send email FIRST before storing in database
-#     email_sent = await send_invite_email_sync(
-#         invite.email, 
-#         token, 
-#         invite.role,
-#         current_user.full_name or current_user.email
-#     )
-    
-#     if not email_sent:
-#         raise HTTPException(
-#             status_code=500, 
-#             detail="Failed to send invitation email. Please check your email configuration."
-#         )
-
-#     # Create new invitation with organization info
-#     invitation = Invitation(
-#         email=invite.email,
-#         token=token,
-#         role=invite.role,
-#         expires_at=expires,
-#         sent_by_id=current_user.id,
-#         organization_id=current_user.organization_id,  #  Attach organization
-#         accepted=False,
-#         created_at=datetime.utcnow()
-#     )
-#     session.add(invitation)
-#     session.commit()
-#     session.refresh(invitation)
-
-#     # Return invitation link for testing
-#     frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
-#     invitation_link = f"{frontend_url}/accept-invitation?token={token}"
-
-#     return {
-#         "message": "Invitation sent successfully!",
-#         "email": invite.email,
-#         "role": invite.role,
-#         "expires_at": invitation.expires_at.isoformat(),
-#         "invitation_link": invitation_link  # For testing
-#     }
-
-
-
 @router.post("/invitations", response_model=dict)
 async def invite(
     invite: InvitationCreate,
@@ -191,9 +89,9 @@ async def invite(
     session.commit()
     session.refresh(invitation)
 
-    # Return URL-safe link
+    # Return link — no quoting needed
     frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
-    invitation_link = f"{frontend_url}/accept-invitation?token={urllib.parse.quote(token)}"
+    invitation_link = f"{frontend_url}/accept-invitation?token={token}"
 
     return {
         "message": "Invitation sent successfully!",
@@ -205,9 +103,8 @@ async def invite(
 
 
 # =====================================================================
-#  ✅ ACCEPT EMAIL INVITATION REQUEST | Changed path to match frontend
+# ✅ ACCEPT EMAIL INVITATION REQUEST
 # =====================================================================
-
 @router.post("/invitations/accept", response_model=dict) 
 def accept_invite(
     data: AccountActivate,
@@ -224,7 +121,6 @@ def accept_invite(
     if datetime.utcnow() > inv.expires_at:
         raise HTTPException(status_code=400, detail="Token expired")
 
-    # Check if user already exists
     existing_user = session.exec(select(User).where(User.email == inv.email)).first()
     if existing_user:
         raise HTTPException(
@@ -232,13 +128,12 @@ def accept_invite(
             detail="User with this email already exists. Please login instead."
         )
 
-    # Create user with organization info
     user = User(
         full_name=data.full_name,
         email=inv.email,
         password_hash=hash_password(data.password),
         role=inv.role,
-        organization_id=inv.organization_id,  # ✅ Attach organization
+        organization_id=inv.organization_id,
         is_active=True,
         is_invited=True,
         created_at=datetime.utcnow()
@@ -247,23 +142,20 @@ def accept_invite(
     session.commit()
     session.refresh(user)
 
-    # Mark invitation accepted
     inv.accepted = True
     inv.accepted_at = datetime.utcnow()
     session.add(inv)
     session.commit()
 
-    # Create JWT token with organization info
     access_token = create_access_token(
         data={
             "sub": user.email,
             "role": user.role,
             "user_id": user.id,
-            "organization_id": user.organization_id  #  Include organization_id
+            "organization_id": user.organization_id
         }
     )
     
-    # Return user + token
     return {
         "access_token": access_token,
         "token_type": "bearer",
@@ -274,7 +166,7 @@ def accept_invite(
             "role": user.role,
             "is_active": True,
             "is_invited": True,
-            "organization_id": user.organization_id,  #  Include organization_id
+            "organization_id": user.organization_id,
             "created_at": user.created_at.isoformat()
         }
     }
@@ -283,63 +175,11 @@ def accept_invite(
 # ==================================================================
 # ✅ VALIDATE INVITATION TOKEN
 # ================================================================== 
-# @router.get("/invitations/validate/{token}")
-# def validate_invitation(token: str, session: Session = Depends(get_session)):
-#     """Validate an invitation token"""
-#     invitation = session.exec(
-#         select(Invitation).where(Invitation.token == token)
-#     ).first()
-
-#     if not invitation:
-#         raise HTTPException(status_code=400, detail="Invalid invitation token.")
-#     if invitation.accepted:
-#         raise HTTPException(status_code=400, detail="Invitation already accepted.")
-#     if datetime.utcnow() > invitation.expires_at:
-#         raise HTTPException(status_code=400, detail="Invitation has expired.")
-
-#     return {
-#         "valid": True,
-#         "email": invitation.email,
-#         "role": invitation.role,
-#         "organization_id": invitation.organization_id,  # ✅ Include organization_id
-#         "expires_at": invitation.expires_at.isoformat()
-#     }
-
-# # --- Get my sent invitations ---
-# @router.get("/my-invitations", response_model=list[dict])
-# def get_my_invitations(
-#     current_user: User = Depends(get_current_user),
-#     session: Session = Depends(get_session)
-# ):
-#     """Get invitations sent by current user"""
-#     invitations = session.exec(
-#         select(Invitation).where(Invitation.sent_by_id == current_user.id)
-#         .order_by(Invitation.created_at.desc())
-#     ).all()
-    
-#     return [
-#         {
-#             "id": invite.id,
-#             "email": invite.email,
-#             "role": invite.role,
-#             "status": "accepted" if invite.accepted else "pending",
-#             "created_at": invite.created_at.isoformat(),
-#             "expires_at": invite.expires_at.isoformat(),
-#             "organization_id": invite.organization_id,  # ✅ Include organization_id
-#             "accepted": invite.accepted
-#         }
-#         for invite in invitations
-#     ]
-
-
-
 @router.get("/invitations/validate/{token}")
 def validate_invitation(token: str, session: Session = Depends(get_session)):
-    import urllib.parse
-    token_safe = urllib.parse.unquote(token)  # ✅ decode token
-
+    # ⚠️ NO unquote needed — token is passed as-is and is URL-safe
     invitation = session.exec(
-        select(Invitation).where(Invitation.token == token_safe)
+        select(Invitation).where(Invitation.token == token)
     ).first()
 
     if not invitation:
@@ -357,19 +197,51 @@ def validate_invitation(token: str, session: Session = Depends(get_session)):
         "expires_at": invitation.expires_at.isoformat()
     }
 
+
 # ==================================================================
-# ✅ GET ALL MEMBERS OF CURRENT ORGANIZATOIN
+# ✅ GET MY INVITATIONS (for current user's organization)
+# ================================================================== 
+@router.get("/my-invitations", response_model=list[dict])
+def get_my_invitations(
+    organization_id: int,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
+):
+    if current_user.organization_id != organization_id:
+        raise HTTPException(status_code=403, detail="Not authorized to view this organization's invitations")
+    
+    invitations = session.exec(
+        select(Invitation).where(Invitation.organization_id == organization_id)
+        .order_by(Invitation.created_at.desc())
+    ).all()
+    
+    return [
+        {
+            "id": invite.id,
+            "email": invite.email,
+            "role": invite.role,
+            "status": "accepted" if invite.accepted else "pending",
+            "created_at": invite.created_at.isoformat(),
+            "expires_at": invite.expires_at.isoformat(),
+            "organization_id": invite.organization_id,
+            "accepted": invite.accepted,
+            "sent_by_id": invite.sent_by_id
+        }
+        for invite in invitations
+    ]
+
+
+# ==================================================================
+# ✅ GET ALL MEMBERS OF CURRENT ORGANIZATION
 # ================================================================== 
 @router.get("/organization-members", response_model=list[dict])
 def get_organization_members(
     current_user: User = Depends(get_current_user),
     session: Session = Depends(get_session)
 ):
-    """Get all users belonging to the current user's organization."""
-    # Fetch all users in the current user's organization
     users = session.exec(
         select(User).where(User.organization_id == current_user.organization_id)
-        .order_by(User.full_name, User.email) # Order for consistency
+        .order_by(User.full_name, User.email)
     ).all()
     
     return [
@@ -390,69 +262,6 @@ def get_organization_members(
 # ==================================================================
 # ✅ RESEND EMAIL INVITATION REQUEST
 # ================================================================== 
-# @router.post("/invitations/resend/{email}", response_model=dict)
-# async def resend_invitation(
-#     email: str,
-#     background_tasks: BackgroundTasks,
-#     current_user: User = Depends(get_current_admin),
-#     session: Session = Depends(get_session)
-# ):
-#     """Resend invitation to an email that has a pending invitation."""
-#     # Find existing invitation for this email
-#     invitation = session.exec(
-#         select(Invitation).where(
-#             Invitation.email == email,
-#             Invitation.sent_by_id == current_user.id,
-#             Invitation.accepted == False,
-#             Invitation.expires_at > datetime.utcnow()
-#         )
-#     ).first()
-    
-#     if not invitation:
-#         raise HTTPException(
-#             status_code=404, 
-#             detail="No pending invitation found for this email."
-#         )
-
-#     # Create new token and expiration
-#     new_token = secrets.token_urlsafe(32)
-#     new_expires = datetime.utcnow() + timedelta(days=7)
-
-#     # Try to send email FIRST before updating database
-#     email_sent = await send_invite_email_sync(
-#         email, 
-#         new_token, 
-#         invitation.role,
-#         current_user.full_name or current_user.email
-#     )
-    
-#     if not email_sent:
-#         raise HTTPException(
-#             status_code=500, 
-#             detail="Failed to resend invitation email. Please check your email configuration."
-#         )
-
-#     # If email was sent successfully, update the invitation in database
-#     invitation.token = new_token
-#     invitation.expires_at = new_expires
-#     invitation.created_at = datetime.utcnow()  # Reset creation time
-    
-#     session.add(invitation)
-#     session.commit()
-
-#     # Return invitation link for testing
-#     frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
-#     invitation_link = f"{frontend_url}/accept-invitation?token={new_token}"
-
-#     return {
-#         "message": "Invitation resent successfully!",
-#         "email": email,
-#         "role": invitation.role,
-#         "expires_at": new_expires.isoformat(),
-#         "invitation_link": invitation_link
-#     }
-
-
 @router.post("/invitations/resend/{email}", response_model=dict)
 async def resend_invitation(
     email: str,
@@ -492,7 +301,7 @@ async def resend_invitation(
     session.commit()
 
     frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
-    invitation_link = f"{frontend_url}/accept-invitation?token={urllib.parse.quote(new_token)}"
+    invitation_link = f"{frontend_url}/accept-invitation?token={new_token}"
 
     return {
         "message": "Invitation resent successfully!",
@@ -504,7 +313,7 @@ async def resend_invitation(
 
 
 # ==================================================================
-#  ✅ REVOKE EMAIL INVITATION REQUEST 
+# ✅ REVOKE EMAIL INVITATION REQUEST 
 # ================================================================== 
 @router.delete("/invitations/{invitation_id}", response_model=dict)
 def revoke_invitation(
@@ -512,30 +321,16 @@ def revoke_invitation(
     current_user: User = Depends(get_current_admin),
     session: Session = Depends(get_session)
 ):
-    """Revoke/delete an invitation by invitation ID."""
-    # Find the invitation
     invitation = session.get(Invitation, invitation_id)
     if not invitation:
-        raise HTTPException(
-            status_code=404, 
-            detail="Invitation not found."
-        )
+        raise HTTPException(status_code=404, detail="Invitation not found.")
 
-    # Check if the invitation was sent by the current user
     if invitation.sent_by_id != current_user.id:
-        raise HTTPException(
-            status_code=403, 
-            detail="Not authorized to revoke this invitation."
-        )
+        raise HTTPException(status_code=403, detail="Not authorized to revoke this invitation.")
 
-    # Check if invitation is already accepted
     if invitation.accepted:
-        raise HTTPException(
-            status_code=400, 
-            detail="Cannot revoke an invitation that has already been accepted."
-        )
+        raise HTTPException(status_code=400, detail="Cannot revoke an invitation that has already been accepted.")
 
-    # Delete the invitation
     session.delete(invitation)
     session.commit()
 
@@ -544,23 +339,15 @@ def revoke_invitation(
     }
 
 
-
 # ==================================================================
-#  ✅ REMOVE MEMBER FROM ORGANIZATION
+# ✅ REMOVE MEMBER FROM ORGANIZATION
 # ==================================================================
-
 @router.delete("/members/{user_id}", status_code=200)
 def remove_member_from_organization(
     user_id: int,
     current_user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
 ):
-    """
-    Remove a member from the current user's organization.
-    Allowed: admins and super_admins.
-    Action: set user's organization_id to None (or delete — we do set-to-None to be safe).
-    """
-    # Role check
     if current_user.role not in [UserRole.ADMIN.value, UserRole.SUPER_ADMIN.value]:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
 
@@ -568,14 +355,11 @@ def remove_member_from_organization(
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
-    # Organization isolation: admin can only remove within their organization
     if current_user.role != UserRole.SUPER_ADMIN.value:
         if user.organization_id != current_user.organization_id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to remove this user")
 
-    # Safe removal: remove organization link (do NOT delete personal user record)
     user.organization_id = None
-    # optionally: user.is_active = False  # if you want to disable the account
     session.add(user)
     session.commit()
     session.refresh(user)

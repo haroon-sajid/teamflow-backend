@@ -194,35 +194,10 @@ def delete_user(
 
     return {"message": "User deleted successfully"}
 
+
 # --------------------------------------------------------
-#  GET MY SENT INVITATIONS
+#  GET ORGANIZATION MEMBER
 # --------------------------------------------------------
-@router.get("/my-invitations", response_model=List[dict])
-def get_my_invitations(
-    current_user: User = Depends(get_current_user),
-    session: Session = Depends(get_session)
-):
-    """Get invitations sent by current user"""
-    invitations = session.exec(
-        select(Invitation).where(Invitation.sent_by_id == current_user.id)
-        .order_by(Invitation.created_at.desc())
-    ).all()
-    
-    return [
-        {
-            "id": invite.id,
-            "email": invite.email,
-            "role": invite.role,
-            "status": "accepted" if invite.accepted else "pending",
-            "created_at": invite.created_at,
-            "expires_at": invite.expires_at,
-            "accepted": invite.accepted
-        }
-        for invite in invitations
-    ]
-
-
-
 router = APIRouter(prefix="/members", tags=["Members"])
 
 @router.get("/organization", response_model=list[UserRead])
@@ -251,97 +226,3 @@ def get_organization_members(
     return members
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# from fastapi import APIRouter, Depends, HTTPException, status
-# from sqlmodel import Session, select
-# from typing import List
-# from models.models import User, UserRole, Organization
-# from schemas.user_schema import UserOut
-# from db.database import get_session
-# from auth.auth import get_current_user, get_current_admin
-
-# router = APIRouter(prefix="/users", tags=["users"])
-
-
-# # ============================================================================
-# # GET ALL USERS (Organization-scoped, accessible to both admin and members)
-# # ============================================================================
-# @router.get("/", response_model=List[UserOut])
-# def get_users(
-#     current_user: User = Depends(get_current_user),
-#     session: Session = Depends(get_session)
-# ):
-#     """
-#     Get all users in the current user's organization.
-    
-#     ✅ FIXED: Both admins and members can access this endpoint
-#     ✅ Users are filtered by organization_id for security
-    
-#     - Admins: See all users in their organization
-#     - Members: See all users in their organization (needed for task assignment dropdowns)
-#     """
-#     # ✅ Get users only from the current user's organization
-#     users = session.exec(
-#         select(User).where(User.organization_id == current_user.organization_id)
-#     ).all()
-    
-#     return [UserOut.model_validate(u) for u in users]
-
-
-# # ============================================================================
-# # GET SINGLE USER
-# # ============================================================================
-# @router.get("/{user_id}", response_model=UserOut)
-# def get_user(
-#     user_id: int,
-#     current_user: User = Depends(get_current_user),
-#     session: Session = Depends(get_session)
-# ):
-#     """
-#     Get a specific user by ID.
-#     ✅ User must be in the same organization as the requesting user.
-#     """
-#     user = session.get(User, user_id)
-#     if not user:
-#         raise HTTPException(status_code=404, detail="User not found")
-    
-#     # ✅ Organization isolation check
-#     if user.organization_id != current_user.organization_id:
-#         raise HTTPException(status_code=403, detail="Not authorized to view this user")
-    
-#     return UserOut.model_validate(user)
-
-
-# # ============================================================================
-# # GET ORGANIZATION MEMBERS (Alias for admin convenience)
-# # ============================================================================
-# @router.get("/organization/members", response_model=List[UserOut])
-# def get_organization_members(
-#     current_user: User = Depends(get_current_user),
-#     session: Session = Depends(get_session)
-# ):
-#     """
-#     Get all members in the current organization.
-#     Filter to only show members with role 'member' (not admins).
-#     """
-#     members = session.exec(
-#         select(User).where(
-#             (User.organization_id == current_user.organization_id) &
-#             (User.role == UserRole.MEMBER.value)
-#         )
-#     ).all()
-    
-#     return [UserOut.model_validate(m) for m in members]
