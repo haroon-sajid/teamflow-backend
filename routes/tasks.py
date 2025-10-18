@@ -4,6 +4,7 @@ from sqlmodel import Session, select
 from typing import List, Optional
 from sqlmodel import delete
 from datetime import datetime, date
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from core.database import get_session
 from models.models import Task, Project, User, TaskMemberLink, UserRole, TaskComment, TaskWorkLog
 from schemas.task_schema import TaskCreate, TaskUpdate, TaskOut, TaskPermissionUpdate, CommentCreate, CommentOut, WorkLogCreate, WorkLogOut
@@ -112,9 +113,22 @@ def create_task(
         organization_id=current_user.organization_id,
         allow_member_edit=payload.allow_member_edit
     )
-    session.add(task)
-    session.commit()
-    session.refresh(task)
+    try:
+        session.add(task)
+        session.commit()
+        session.refresh(task)
+    except IntegrityError as e:
+        session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A database constraint was violated while creating the task."
+        )
+    except SQLAlchemyError as e:
+        session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="A database error occurred while creating the task."
+        )
 
     # Assign members to the task
     if member_ids_to_assign:
@@ -395,9 +409,22 @@ def update_task(
     for key, value in update_data.items():
         setattr(task, key, value)
     
-    session.add(task)
-    session.commit()
-    session.refresh(task)
+    try:
+        session.add(task)
+        session.commit()
+        session.refresh(task)
+    except IntegrityError as e:
+        session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A database constraint was violated while updating the task."
+        )
+    except SQLAlchemyError as e:
+        session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="A database error occurred while updating the task."
+        )
     
     # Prepare response with member information
     member_ids = session.exec(
@@ -452,14 +479,24 @@ def delete_task(
         # Finally delete the task itself
         session.delete(task)
         session.commit()
-    except Exception as e:
-        # Rollback in case something went wrong and return 500 with message
+    except IntegrityError as e:
         session.rollback()
-        # Log the original exception to the server console (use your logger if any)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A database constraint was violated while deleting the task."
+        )
+    except SQLAlchemyError as e:
+        session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="A database error occurred while deleting the task."
+        )
+    except Exception as e:
+        session.rollback()
         print("Error deleting task:", e)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to delete task. See server logs for details."
+            detail="An unexpected error occurred while deleting the task."
         )
 
 

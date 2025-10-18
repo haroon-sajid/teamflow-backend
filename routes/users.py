@@ -3,6 +3,7 @@
 from fastapi import APIRouter, HTTPException, Depends, status
 from sqlmodel import Session, select
 from typing import List
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from models.models import User, UserRole
 from schemas.user_schema import UserCreate, UserRead, UserUpdate
@@ -67,10 +68,30 @@ def update_current_user_profile(
             )
         current_user.is_active = user_update.is_active
 
-    session.add(current_user)
-    session.commit()
-    session.refresh(current_user)
-    return current_user
+    try:
+        session.add(current_user)
+        session.commit()
+        session.refresh(current_user)
+        return current_user
+    except IntegrityError as e:
+        session.rollback()
+        error_msg = str(e.orig)
+        if "uq_org_email" in error_msg:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email already registered in this organization."
+            )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="A database constraint was violated."
+            )
+    except SQLAlchemyError as e:
+        session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="A database error occurred while updating your profile."
+        )
 
 
 # ----------------------------------------------------------------------
@@ -154,10 +175,30 @@ def update_user(
     if user_update.is_active is not None:
         user.is_active = user_update.is_active
 
-    session.add(user)
-    session.commit()
-    session.refresh(user)
-    return user
+    try:
+        session.add(user)
+        session.commit()
+        session.refresh(user)
+        return user
+    except IntegrityError as e:
+        session.rollback()
+        error_msg = str(e.orig)
+        if "uq_org_email" in error_msg:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email already registered in this organization."
+            )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="A database constraint was violated."
+            )
+    except SQLAlchemyError as e:
+        session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="A database error occurred while updating the user."
+        )
 
 
 # ----------------------------------------------------------------------
@@ -183,9 +224,16 @@ def delete_user(
             detail="You cannot delete your own account."
         )
 
-    session.delete(user)
-    session.commit()
-    return {"message": "User deleted successfully."}
+    try:
+        session.delete(user)
+        session.commit()
+        return {"message": "User deleted successfully."}
+    except SQLAlchemyError as e:
+        session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="A database error occurred while deleting the user."
+        )
 
 
 # ----------------------------------------------------------------------

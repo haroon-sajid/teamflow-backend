@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, Depends, status, Query
 from sqlmodel import Session, select
 from datetime import datetime
 import re
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from models.models import User, UserRole, Organization
 from schemas.user_schema import UserLogin, UserCreate, UserRead
@@ -82,11 +83,32 @@ def public_signup(user_data: UserCreate, session: Session = Depends(get_session)
             },
         }
 
+    except IntegrityError as e:
+        session.rollback()
+        error_msg = str(e.orig)
+        if "uq_org_email" in error_msg:
+            raise HTTPException(
+                status_code=400, detail="A user with this email already exists in this organization."
+            )
+        elif "uq_org_invite_email" in error_msg:
+            raise HTTPException(
+                status_code=400, detail="An invitation for this email already exists in this organization."
+            )
+        else:
+            raise HTTPException(
+                status_code=400, detail="A database constraint was violated."
+            )
+    except SQLAlchemyError as e:
+        session.rollback()
+        print("❌ Signup database error:", e)
+        raise HTTPException(
+            status_code=500, detail="A database error occurred while creating your account."
+        )
     except Exception as e:
         session.rollback()
         print("❌ Signup error:", e)
         raise HTTPException(
-            status_code=500, detail=f"Signup failed: {str(e)}"
+            status_code=500, detail="An unexpected error occurred while creating your account."
         )
 
 
@@ -159,9 +181,12 @@ def login(
 
     except HTTPException:
         raise
+    except SQLAlchemyError as e:
+        print("❌ Login database error:", e)
+        raise HTTPException(status_code=500, detail="A database error occurred while processing your login.")
     except Exception as e:
         print("❌ Login error:", e)
-        raise HTTPException(status_code=500, detail=f"Login failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="An unexpected error occurred while processing your login.")
 
 
 # ==========================================================

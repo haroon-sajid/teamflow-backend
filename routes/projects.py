@@ -1,8 +1,10 @@
 # routes/projects.py
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, status
 from sqlmodel import Session, select
 from typing import List
 from datetime import datetime
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from sqlalchemy import desc
 from core.database import get_session
 from models.models import Project, User
 from schemas.project_schema import ProjectCreate, ProjectRead
@@ -22,14 +24,27 @@ def create_project(
     project = Project(
         name=data.name,
         description=data.description,
-        creator_id=current_user.id,
+        creator_id=current_user.id or 0,
         organization_id=current_user.organization_id,  #  Attach organization
         created_at=datetime.utcnow()
     )
-    session.add(project)
-    session.commit()
-    session.refresh(project)
-    return project
+    try:
+        session.add(project)
+        session.commit()
+        session.refresh(project)
+        return project
+    except IntegrityError as e:
+        session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A project with this name may already exist in your organization."
+        )
+    except SQLAlchemyError as e:
+        session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="A database error occurred while creating the project."
+        )
 
 # ==================================================================
 #  ✅ Get All Projects (filtered by organization)
@@ -41,8 +56,9 @@ def get_projects(
 ):
     # Only get projects from the user's organization
     projects = session.exec(
-        select(Project).where(Project.organization_id == current_user.organization_id)
-        .order_by(Project.created_at.desc())
+        select(Project)
+        .where(Project.organization_id == current_user.organization_id)
+        .order_by(desc(Project.created_at))
     ).all()
     return projects
 
@@ -85,10 +101,23 @@ def update_project(
 
     project.name = data.name
     project.description = data.description
-    session.add(project)
-    session.commit()
-    session.refresh(project)
-    return project
+    try:
+        session.add(project)
+        session.commit()
+        session.refresh(project)
+        return project
+    except IntegrityError as e:
+        session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A project with this name may already exist in your organization."
+        )
+    except SQLAlchemyError as e:
+        session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="A database error occurred while updating the project."
+        )
 
 # ==================================================================
 #  ✅ Delete Project (with organization check)
@@ -107,6 +136,13 @@ def delete_project(
     if project.organization_id != current_user.organization_id:
         raise HTTPException(status_code=403, detail="Not authorized to delete this project")
 
-    session.delete(project)
-    session.commit()
-    return {"message": "Project deleted successfully"}
+    try:
+        session.delete(project)
+        session.commit()
+        return {"message": "Project deleted successfully"}
+    except SQLAlchemyError as e:
+        session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="A database error occurred while deleting the project."
+        )

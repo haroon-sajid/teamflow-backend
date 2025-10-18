@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlmodel import Session, select
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from core.database import get_session
 from core.security import (
@@ -133,10 +134,27 @@ async def invite(
         session.add(invitation)
         session.commit()
         session.refresh(invitation)
+    except IntegrityError as e:
+        session.rollback()
+        error_msg = str(e.orig)
+        if "uq_org_invite_email" in error_msg:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="An invitation for this email already exists in this organization."
+            )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="A database constraint was violated while creating the invitation."
+            )
+    except SQLAlchemyError as e:
+        session.rollback()
+        logger.exception("Failed to store invitation record for %s: %s", invite.email, e)
+        raise HTTPException(status_code=500, detail="A database error occurred while creating the invitation.")
     except Exception as exc:
+        session.rollback()
         logger.exception("Failed to store invitation record for %s: %s", invite.email, exc)
-        # don't leak internal details to client
-        raise HTTPException(status_code=500, detail="Failed to record invitation. Contact administrator.")
+        raise HTTPException(status_code=500, detail="An unexpected error occurred while creating the invitation.")
 
     return {
         "message": "Invitation sent successfully!",
@@ -233,9 +251,27 @@ def accept_invite(data: AccountActivate, session: Session = Depends(get_session)
         session.add(user)
         session.commit()
         session.refresh(user)
+    except IntegrityError as e:
+        session.rollback()
+        error_msg = str(e.orig)
+        if "uq_org_email" in error_msg:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="A user with this email already exists in this organization."
+            )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="A database constraint was violated while creating your account."
+            )
+    except SQLAlchemyError as e:
+        session.rollback()
+        logger.exception("Failed to create user from invitation for %s: %s", email, e)
+        raise HTTPException(status_code=500, detail="A database error occurred while creating your account.")
     except Exception as exc:
+        session.rollback()
         logger.exception("Failed to create user from invitation for %s: %s", email, exc)
-        raise HTTPException(status_code=500, detail="Failed to create user account.")
+        raise HTTPException(status_code=500, detail="An unexpected error occurred while creating your account.")
 
     # Mark invitation record accepted if exists (audit)
     try:
@@ -243,8 +279,17 @@ def accept_invite(data: AccountActivate, session: Session = Depends(get_session)
         invitation_record.accepted_at = datetime.utcnow()
         session.add(invitation_record)
         session.commit()
-    except Exception:
-        logger.exception("Failed to mark invitation as accepted for %s", email)
+    except IntegrityError as e:
+        session.rollback()
+        logger.exception("Failed to mark invitation as accepted for %s: %s", email, e)
+        # not fatal for the user creation flow
+    except SQLAlchemyError as e:
+        session.rollback()
+        logger.exception("Failed to mark invitation as accepted for %s: %s", email, e)
+        # not fatal for the user creation flow
+    except Exception as e:
+        session.rollback()
+        logger.exception("Failed to mark invitation as accepted for %s: %s", email, e)
         # not fatal for the user creation flow
 
     # Issue access token
