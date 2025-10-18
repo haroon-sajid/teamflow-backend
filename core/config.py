@@ -2,7 +2,8 @@
 # core/config.py — FastAPI Configuration (Render + SendGrid + Pydantic v2)
 # ================================================================
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import EmailStr
+from pydantic import EmailStr, ValidationError
+import sys
 
 
 class Settings(BaseSettings):
@@ -45,5 +46,18 @@ class Settings(BaseSettings):
     )
 
 
-# Global settings instance
-settings = Settings()
+# ------------------------
+# Global Settings Loader
+# ------------------------
+try:
+    settings = Settings()
+    print("✅ Environment variables loaded successfully.")
+    print(f"🌍 Environment: {settings.ENVIRONMENT}, Debug: {settings.DEBUG}")
+except ValidationError as e:
+    print("❌ Environment configuration error — missing or invalid settings!")
+    print(e)
+    sys.exit(1)
+except Exception as ex:
+    print("❌ Unexpected error while loading environment variables:")
+    print(ex)
+    sys.exit(1)
