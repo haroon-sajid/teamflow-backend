@@ -36,7 +36,6 @@ def public_signup(user_data: UserCreate, session: Session = Depends(get_session)
     try:
         print(f"📝 Signup attempt for {user_data.email}")
 
-        # No global email check (each org isolated)
         org_name = f"{user_data.full_name}'s Organization"
         org_slug = generate_slug(org_name)
 
@@ -67,7 +66,7 @@ def public_signup(user_data: UserCreate, session: Session = Depends(get_session)
                 "organization_id": new_user.organization_id,
             }
         )
-        print(f"DEBUG: Generated JWT payload: sub={new_user.email}, role={new_user.role}, user_id={new_user.id}, organization_id={new_user.organization_id}")
+        print(f"DEBUG: JWT payload: sub={new_user.email}, role={new_user.role}, org={new_user.organization_id}")
 
         return {
             "access_token": access_token,
@@ -88,27 +87,34 @@ def public_signup(user_data: UserCreate, session: Session = Depends(get_session)
         error_msg = str(e.orig)
         if "uq_org_email" in error_msg:
             raise HTTPException(
-                status_code=400, detail="A user with this email already exists in this organization."
+                status_code=400,
+                detail="A user with this email already exists in your organization. Please log in instead."
             )
         elif "uq_org_invite_email" in error_msg:
             raise HTTPException(
-                status_code=400, detail="An invitation for this email already exists in this organization."
+                status_code=400,
+                detail="An invitation has already been sent to this email. Please check your inbox."
             )
         else:
             raise HTTPException(
-                status_code=400, detail="A database constraint was violated."
+                status_code=400,
+                detail="A data integrity issue occurred while creating your account. Please try again."
             )
+
     except SQLAlchemyError as e:
         session.rollback()
         print("❌ Signup database error:", e)
         raise HTTPException(
-            status_code=500, detail="A database error occurred while creating your account."
+            status_code=500,
+            detail="A server error occurred while creating your account. Please try again later."
         )
+
     except Exception as e:
         session.rollback()
-        print("❌ Signup error:", e)
+        print("❌ Unexpected signup error:", e)
         raise HTTPException(
-            status_code=500, detail="An unexpected error occurred while creating your account."
+            status_code=500,
+            detail="An unexpected error occurred while creating your account. Please contact support."
         )
 
 
@@ -123,39 +129,41 @@ def login(
 ):
     """Login for a specific organization using org slug or auto-detect"""
     try:
-        # If organization_slug is not provided, try to find user's organization
         if not organization_slug:
-            db_user = session.exec(
-                select(User).where(User.email == user.email)
-            ).first()
+            db_user = session.exec(select(User).where(User.email == user.email)).first()
             if not db_user:
-                raise HTTPException(status_code=404, detail="No account found with this email.")
+                raise HTTPException(status_code=404, detail="No account found for this email address.")
             org_id = db_user.organization_id
         else:
-            # If organization_slug is provided, validate it
-            org = session.exec(
-                select(Organization).where(Organization.slug == organization_slug)
-            ).first()
+            org = session.exec(select(Organization).where(Organization.slug == organization_slug)).first()
             if not org:
-                raise HTTPException(status_code=404, detail="Organization not found")
+                raise HTTPException(status_code=404, detail="The specified organization could not be found.")
             org_id = org.id
 
-        # Find user in the specific organization
         db_user = session.exec(
             select(User).where(
                 User.email == user.email,
                 User.organization_id == org_id,
             )
         ).first()
-        
+
         if not db_user:
-            raise HTTPException(status_code=404, detail="No user found for this organization")
+            raise HTTPException(
+                status_code=404,
+                detail="No user found with this email under the selected organization."
+            )
 
         if not verify_password(user.password, db_user.password_hash):
-            raise HTTPException(status_code=401, detail="Incorrect password")
+            raise HTTPException(
+                status_code=401,
+                detail="Incorrect email or password. Please try again."
+            )
 
         if not db_user.is_active:
-            raise HTTPException(status_code=403, detail="Account is inactive")
+            raise HTTPException(
+                status_code=403,
+                detail="Your account is currently inactive. Please contact your administrator."
+            )
 
         token = create_access_token(
             data={
@@ -165,7 +173,7 @@ def login(
                 "organization_id": db_user.organization_id,
             }
         )
-        print(f"DEBUG: Generated JWT payload: sub={db_user.email}, role={db_user.role}, user_id={db_user.id}, organization_id={db_user.organization_id}")
+        print(f"DEBUG: JWT payload: sub={db_user.email}, role={db_user.role}, org={db_user.organization_id}")
 
         return {
             "access_token": token,
@@ -183,10 +191,16 @@ def login(
         raise
     except SQLAlchemyError as e:
         print("❌ Login database error:", e)
-        raise HTTPException(status_code=500, detail="A database error occurred while processing your login.")
+        raise HTTPException(
+            status_code=500,
+            detail="A server error occurred while processing your login. Please try again later."
+        )
     except Exception as e:
-        print("❌ Login error:", e)
-        raise HTTPException(status_code=500, detail="An unexpected error occurred while processing your login.")
+        print("❌ Unexpected login error:", e)
+        raise HTTPException(
+            status_code=500,
+            detail="An unexpected error occurred while logging you in. Please contact support."
+        )
 
 
 # ==========================================================

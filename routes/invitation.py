@@ -67,16 +67,16 @@ async def invite(
     """
     org_id = current_user.organization_id
     if not org_id:
-        raise HTTPException(status_code=400, detail="Current user does not belong to any organization.")
+        raise HTTPException(status_code=400, detail="Unable to send invitation. The current user is not associated with any organization.")
     if not current_user.id:
-        raise HTTPException(status_code=400, detail="Current user has no ID.")
+        raise HTTPException(status_code=400, detail="Unable to identify the current user. Please log in again.")
 
     # check if user already exists in the same org
     existing = session.exec(
         select(User).where(User.email == invite.email, User.organization_id == org_id)
     ).first()
     if existing:
-        raise HTTPException(status_code=400, detail="User with this email already exists in your organization.")
+        raise HTTPException(status_code=400, detail="A user with this email already exists in your organization.")
 
     # check for pending invitation in the same org
     pending = session.exec(
@@ -88,19 +88,15 @@ async def invite(
         )
     ).first()
     if pending:
-        raise HTTPException(status_code=400, detail="Pending invitation already exists for this email in your organization.")
+        raise HTTPException(status_code=400, detail="An active invitation already exists for this email in your organization.")
 
     # Generate UUID token for invitation
     token = str(uuid.uuid4())
-
-    # DB expires for audit
     expires_at = datetime.utcnow() + timedelta(days=INVITATION_VALID_DAYS)
-
-    # ensure org name for email
     org_name = _get_org_name(session, org_id)
+    invitation_link = _build_invitation_link(token)
 
     # attempt to send email (await)
-    invitation_link = _build_invitation_link(token)
     try:
         email_ok = await email_service.send_invitation_email(
             to_email=invite.email,
@@ -111,16 +107,16 @@ async def invite(
         )
     except Exception as exc:
         logger.exception("Exception while calling email_service.send_invitation_email: %s", exc)
-        raise HTTPException(status_code=500, detail="Failed to send invitation email.")
+        raise HTTPException(status_code=500, detail="Failed to send the invitation email. Please try again later.")
 
     if not email_ok:
         logger.error("Email service reported failure sending to %s", invite.email)
-        raise HTTPException(status_code=500, detail="Failed to send invitation email.")
+        raise HTTPException(status_code=500, detail="Unable to send the invitation email. Please check the email address or try again later.")
 
-    # store invitation record for audit & ability to revoke
+    # store invitation record for audit
     try:
         if not current_user.id:
-            raise HTTPException(status_code=400, detail="Current user has no ID.")
+            raise HTTPException(status_code=400, detail="Unable to identify the current user.")
         invitation = Invitation(
             email=invite.email,
             token=token,
@@ -145,19 +141,19 @@ async def invite(
         else:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="A database constraint was violated while creating the invitation."
+                detail="A database constraint was violated while creating the invitation. Please try again."
             )
     except SQLAlchemyError as e:
         session.rollback()
         logger.exception("Failed to store invitation record for %s: %s", invite.email, e)
-        raise HTTPException(status_code=500, detail="A database error occurred while creating the invitation.")
+        raise HTTPException(status_code=500, detail="A database error occurred while saving the invitation.")
     except Exception as exc:
         session.rollback()
         logger.exception("Failed to store invitation record for %s: %s", invite.email, exc)
         raise HTTPException(status_code=500, detail="An unexpected error occurred while creating the invitation.")
 
     return {
-        "message": "Invitation sent successfully!",
+        "message": "Invitation sent successfully.",
         "email": invite.email,
         "role": invite.role,
         "expires_at": invitation.expires_at.isoformat(),
@@ -167,29 +163,19 @@ async def invite(
 
 
 # ==================================================================
-# Validate invitation token (used by frontend before showing accept form)
+# Validate invitation token
 # ==================================================================
 @router.get("/invitations/validate/{token}", response_model=dict)
 def validate_invitation(token: str, session: Session = Depends(get_session)):
-    """
-    Validate an invitation token.
-    Checks UUID token against database records.
-    """
-    # Find invitation by token
+    """Validate an invitation token."""
     invitation = session.exec(select(Invitation).where(Invitation.token == token)).first()
     
-    # Check if invitation exists
     if not invitation:
-        logger.info("Invalid invitation token: %s", token[:8])
-        raise HTTPException(status_code=400, detail="Invalid or expired invitation token.")
-    
-    # Check if already accepted
+        raise HTTPException(status_code=400, detail="Invalid or expired invitation link.")
     if invitation.accepted:
-        raise HTTPException(status_code=400, detail="Invitation already accepted.")
-    
-    # Check if expired
+        raise HTTPException(status_code=400, detail="This invitation has already been accepted.")
     if datetime.utcnow() > invitation.expires_at:
-        raise HTTPException(status_code=400, detail="Invitation has expired.")
+        raise HTTPException(status_code=400, detail="This invitation has expired. Please request a new one.")
 
     logger.info("Invitation token validated for %s (org %s)", invitation.email, invitation.organization_id)
     return {
@@ -206,35 +192,28 @@ def validate_invitation(token: str, session: Session = Depends(get_session)):
 # ==================================================================
 @router.post("/invitations/accept", response_model=dict)
 def accept_invite(data: AccountActivate, session: Session = Depends(get_session)):
-    """
-    Accept an invitation. Expects payload with:
-    - token (UUID)
-    - full_name
-    - password
-    """
+    """Accept an invitation and activate the user account."""
     token = data.token
     if not token:
-        raise HTTPException(status_code=400, detail="Missing token in request.")
+        raise HTTPException(status_code=400, detail="Invitation token is missing in the request.")
 
-    # Find invitation by token
     invitation_record = session.exec(select(Invitation).where(Invitation.token == token)).first()
     if not invitation_record:
-        raise HTTPException(status_code=400, detail="Invalid or expired invitation token.")
+        raise HTTPException(status_code=400, detail="Invalid or expired invitation link.")
     if invitation_record.accepted:
-        raise HTTPException(status_code=400, detail="Invitation already accepted.")
+        raise HTTPException(status_code=400, detail="This invitation has already been accepted.")
     if datetime.utcnow() > (invitation_record.expires_at or datetime.min):
-        raise HTTPException(status_code=400, detail="Invitation has expired.")
-    
+        raise HTTPException(status_code=400, detail="This invitation has expired. Please request a new one.")
+
     email = invitation_record.email
     org_id = invitation_record.organization_id
     role = invitation_record.role
 
-    # Check user doesn't already exist in this org
     existing_user = session.exec(
         select(User).where(User.email == email, User.organization_id == org_id)
     ).first()
     if existing_user:
-        raise HTTPException(status_code=400, detail="User already exists in this organization. Please log in.")
+        raise HTTPException(status_code=400, detail="A user with this email already exists in your organization. Please log in instead.")
 
     # Create user
     try:
@@ -262,7 +241,7 @@ def accept_invite(data: AccountActivate, session: Session = Depends(get_session)
         else:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="A database constraint was violated while creating your account."
+                detail="A database constraint was violated while creating your account. Please try again."
             )
     except SQLAlchemyError as e:
         session.rollback()
@@ -271,7 +250,7 @@ def accept_invite(data: AccountActivate, session: Session = Depends(get_session)
     except Exception as exc:
         session.rollback()
         logger.exception("Failed to create user from invitation for %s: %s", email, exc)
-        raise HTTPException(status_code=500, detail="An unexpected error occurred while creating your account.")
+        raise HTTPException(status_code=500, detail="An unexpected error occurred while activating your account.")
 
     # Mark invitation record accepted if exists (audit)
     try:
@@ -279,18 +258,10 @@ def accept_invite(data: AccountActivate, session: Session = Depends(get_session)
         invitation_record.accepted_at = datetime.utcnow()
         session.add(invitation_record)
         session.commit()
-    except IntegrityError as e:
-        session.rollback()
-        logger.exception("Failed to mark invitation as accepted for %s: %s", email, e)
-        # not fatal for the user creation flow
-    except SQLAlchemyError as e:
-        session.rollback()
-        logger.exception("Failed to mark invitation as accepted for %s: %s", email, e)
-        # not fatal for the user creation flow
     except Exception as e:
         session.rollback()
         logger.exception("Failed to mark invitation as accepted for %s: %s", email, e)
-        # not fatal for the user creation flow
+        # Not fatal for the user creation flow
 
     # Issue access token
     access_token = create_access_token(
@@ -320,13 +291,13 @@ def accept_invite(data: AccountActivate, session: Session = Depends(get_session)
 
 
 # ==================================================================
-# Get invitations for current user's organization (audit)
+# Get invitations for current user's organization
 # ==================================================================
 @router.get("/my-invitations", response_model=list[dict])
 def get_my_invitations(current_user: User = Depends(get_current_user), session: Session = Depends(get_session)):
     org_id = current_user.organization_id
     if not org_id:
-        raise HTTPException(status_code=400, detail="Current user does not belong to any organization.")
+        raise HTTPException(status_code=400, detail="You are not associated with any organization.")
 
     invitations = session.exec(
         select(Invitation).where(Invitation.organization_id == org_id)
@@ -349,7 +320,7 @@ def get_my_invitations(current_user: User = Depends(get_current_user), session: 
 
 
 # ==================================================================
-# Resend invitation (generates new token and sends email)
+# Resend invitation
 # ==================================================================
 @router.post("/invitations/resend/{email}", response_model=dict)
 async def resend_invitation(
@@ -360,7 +331,7 @@ async def resend_invitation(
 ):
     org_id = current_user.organization_id
     if not org_id:
-        raise HTTPException(status_code=400, detail="Current user does not belong to any organization.")
+        raise HTTPException(status_code=400, detail="You are not associated with any organization.")
 
     invitation = session.exec(
         select(Invitation).where(
@@ -397,13 +368,13 @@ async def resend_invitation(
         )
     except Exception as exc:
         logger.exception("Failed to resend invitation email to %s: %s", email, exc)
-        raise HTTPException(status_code=500, detail="Failed to resend invitation email.")
+        raise HTTPException(status_code=500, detail="Failed to resend the invitation email. Please try again later.")
 
     if not email_ok:
-        raise HTTPException(status_code=500, detail="Email service reported failure.")
+        raise HTTPException(status_code=500, detail="Email service reported failure while resending the invitation.")
 
     return {
-        "message": "Invitation resent successfully!",
+        "message": "Invitation resent successfully.",
         "email": email,
         "role": invitation.role,
         "expires_at": invitation.expires_at.isoformat(),
@@ -412,7 +383,7 @@ async def resend_invitation(
 
 
 # ==================================================================
-# Revoke invitation (delete audit record)
+# Revoke invitation
 # ==================================================================
 @router.delete("/invitations/{invitation_id}", response_model=dict)
 def revoke_invitation(
@@ -420,7 +391,7 @@ def revoke_invitation(
 ):
     org_id = current_user.organization_id
     if not org_id:
-        raise HTTPException(status_code=400, detail="Current user does not belong to any organization.")
+        raise HTTPException(status_code=400, detail="You are not associated with any organization.")
 
     invitation = session.exec(
         select(Invitation).where(Invitation.id == invitation_id, Invitation.organization_id == org_id)
@@ -428,7 +399,7 @@ def revoke_invitation(
     if not invitation:
         raise HTTPException(status_code=404, detail="Invitation not found in your organization.")
     if invitation.accepted:
-        raise HTTPException(status_code=400, detail="Cannot revoke an already accepted invitation.")
+        raise HTTPException(status_code=400, detail="Cannot revoke an invitation that has already been accepted.")
 
     session.delete(invitation)
     session.commit()
@@ -436,13 +407,13 @@ def revoke_invitation(
 
 
 # ==================================================================
-# Organization members (accepted users)
+# Organization members
 # ==================================================================
 @router.get("/organization-members", response_model=list[dict])
 def get_organization_members(current_user: User = Depends(get_current_user), session: Session = Depends(get_session)):
     org_id = current_user.organization_id
     if not org_id:
-        raise HTTPException(status_code=400, detail="Current user does not belong to any organization.")
+        raise HTTPException(status_code=400, detail="You are not associated with any organization.")
 
     users = session.exec(select(User).where(User.organization_id == org_id, User.is_active == True)).all()
 
@@ -469,17 +440,16 @@ def remove_member_from_organization(
     user_id: int, current_user: User = Depends(get_current_user), session: Session = Depends(get_session)
 ):
     if current_user.role not in [UserRole.ADMIN.value, UserRole.SUPER_ADMIN.value]:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized.")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You are not authorized to remove members from this organization.")
 
     user = session.get(User, user_id)
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
-
     if current_user.role != UserRole.SUPER_ADMIN.value and user.organization_id != current_user.organization_id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot remove users from another organization.")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You cannot remove members from another organization.")
 
     user.organization_id = None
     session.add(user)
     session.commit()
     session.refresh(user)
-    return {"success": True, "message": "Member removed from organization."}
+    return {"success": True, "message": "Member removed from organization successfully."}
