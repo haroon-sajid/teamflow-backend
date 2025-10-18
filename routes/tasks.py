@@ -155,27 +155,22 @@ def create_task(
 # ============================================================================
 @router.get("/", response_model=List[TaskOut])
 def get_tasks(
-    organization_id: int,
     current_user: User = Depends(get_current_user),
     session: Session = Depends(get_session)
 ):
     """
-    Get all tasks for the user's organization.
-    Admins see all tasks, members see only their assigned tasks.
+    Retrieve all tasks for the current user's organization.
+    - Admins/Super Admins see all tasks in the organization.
+    - Members see only the tasks they are assigned to.
     """
-    if organization_id != current_user.organization_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You can only view tasks from your own organization"
-        )
+    organization_id = current_user.organization_id
 
-    if current_user.role in [UserRole.ADMIN, UserRole.SUPER_ADMIN]:
-        # Admins see all tasks in the organization
+    # Fetch tasks based on user role
+    if current_user.role in [UserRole.ADMIN.value, UserRole.SUPER_ADMIN.value]:
         tasks = session.exec(
             select(Task).where(Task.organization_id == organization_id)
         ).all()
     else:
-        # Members see only their assigned tasks
         tasks = session.exec(
             select(Task)
             .join(TaskMemberLink)
@@ -185,19 +180,19 @@ def get_tasks(
             )
         ).all()
 
-    # Enhance tasks with project and member information
+    # Enhance tasks with project & member details
     enhanced_tasks = []
     for task in tasks:
         # Get project name
         project = session.get(Project, task.project_id)
         project_name = project.name if project else None
-        
-        # Get member IDs and names
+
+        # Get assigned members
         member_links = session.exec(
             select(TaskMemberLink).where(TaskMemberLink.task_id == task.id)
         ).all()
         member_ids = [link.user_id for link in member_links]
-        
+
         member_names = []
         if member_ids:
             members = session.exec(
@@ -205,24 +200,26 @@ def get_tasks(
             ).all()
             member_names = [member.full_name for member in members]
 
-        enhanced_task = TaskOut(
-            id=task.id,
-            title=task.title,
-            description=task.description,
-            status=task.status,
-            priority=task.priority,
-            due_date=task.due_date,
-            project_id=task.project_id,
-            organization_id=task.organization_id,
-            allow_member_edit=task.allow_member_edit,
-            created_at=task.created_at,
-            member_ids=member_ids,
-            project_name=project_name,
-            member_names=member_names
+        enhanced_tasks.append(
+            TaskOut(
+                id=task.id,
+                title=task.title,
+                description=task.description,
+                status=task.status,
+                priority=task.priority,
+                due_date=task.due_date,
+                project_id=task.project_id,
+                organization_id=task.organization_id,
+                allow_member_edit=task.allow_member_edit,
+                created_at=task.created_at,
+                member_ids=member_ids,
+                project_name=project_name,
+                member_names=member_names,
+            )
         )
-        enhanced_tasks.append(enhanced_task)
 
     return enhanced_tasks
+
 
 
 # ============================================================================
@@ -254,7 +251,7 @@ def get_task(
         )
 
     # For members, check if they're assigned to the task
-    if current_user.role == UserRole.MEMBER:
+    if current_user.role == UserRole.MEMBER.value:
         if not _is_user_assigned_to_task(session, current_user.id, task_id):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -489,7 +486,7 @@ def update_task_status(
         raise HTTPException(status_code=403, detail="You don't have access to this task")
 
     # Check role
-    if current_user.role == UserRole.MEMBER:
+    if current_user.role == UserRole.MEMBER.value:
         if not _is_user_assigned_to_task(session, current_user.id, task_id):
             raise HTTPException(status_code=403, detail="You are not assigned to this task")
 
@@ -618,7 +615,7 @@ def create_task_comment(
             detail="You don't have access to this task"
         )
 
-    if current_user.role == UserRole.MEMBER:
+    if current_user.role == UserRole.MEMBER.value:
         if not _is_user_assigned_to_task(session, current_user.id, task_id):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -671,7 +668,7 @@ def get_task_work_logs(
             detail="You don't have access to this task"
         )
 
-    if current_user.role == UserRole.MEMBER:
+    if current_user.role == UserRole.MEMBER.value:
         if not _is_user_assigned_to_task(session, current_user.id, task_id):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -733,7 +730,7 @@ def create_task_work_log(
             detail="You don't have access to this task"
         )
 
-    if current_user.role == UserRole.MEMBER:
+    if current_user.role == UserRole.MEMBER.value:
         if not _is_user_assigned_to_task(session, current_user.id, task_id):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -831,66 +828,3 @@ def toggle_task_permission(
         project_name=project_name,
         member_names=member_names
     )
-
-
-# ============================================================================
-#  ✅ Update Task Status (admins + assigned members)
-# ============================================================================
-# @router.patch("/{task_id}/status", response_model=TaskOut)
-# def update_task_status(
-#     task_id: int,
-#     payload: dict,                       # { "status": "In Progress" }
-#     current_user: User = Depends(get_current_user),
-#     session: Session = Depends(get_session)
-# ):
-#     task = session.get(Task, task_id)
-#     if not task:
-#         raise HTTPException(404, "Task not found")
-
-#     # organization check
-#     if task.organization_id != current_user.organization_id:
-#         raise HTTPException(403, "No access to this task")
-
-#     # members must be assigned
-#     if current_user.role == UserRole.MEMBER:
-#         assigned = session.exec(
-#             select(TaskMemberLink).where(
-#                 TaskMemberLink.task_id == task_id,
-#                 TaskMemberLink.user_id == current_user.id
-#             )
-#         ).first()
-#         if not assigned:
-#             raise HTTPException(403, "You are not assigned to this task")
-
-#     # update only the status column
-#     new_status = payload.get("status")
-#     if not new_status:
-#         raise HTTPException(400, "status field required")
-
-#     task.status = new_status
-#     session.commit()
-#     session.refresh(task)
-
-#     # build the same response shape the frontend expects
-#     member_links = session.exec(
-#         select(TaskMemberLink).where(TaskMemberLink.task_id == task.id)
-#     ).all()
-#     member_ids = [link.user_id for link in member_links]
-#     members = session.exec(select(User).where(User.id.in_(member_ids))).all()
-#     project = session.get(Project, task.project_id)
-
-#     return TaskOut(
-#         id=task.id,
-#         title=task.title,
-#         description=task.description,
-#         status=task.status,
-#         priority=task.priority,
-#         due_date=task.due_date,
-#         project_id=task.project_id,
-#         organization_id=task.organization_id,
-#         allow_member_edit=task.allow_member_edit,
-#         created_at=task.created_at,
-#         member_ids=member_ids,
-#         project_name=project.name if project else None,
-#         member_names=[m.full_name for m in members],
-#     )

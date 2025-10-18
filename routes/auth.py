@@ -1,81 +1,49 @@
-# routes/auth.py
-from fastapi import APIRouter, HTTPException, Depends, status
+from fastapi import APIRouter, HTTPException, Depends, status, Query
 from sqlmodel import Session, select
 from datetime import datetime
-from typing import Optional
 import re
 
-from models.models import User, UserRole, Invitation, Organization
-from schemas.user_schema import UserLogin, InvitationCreate, AccountActivate, UserRead, UserCreate
+from models.models import User, UserRole, Organization
+from schemas.user_schema import UserLogin, UserCreate, UserRead
 from core.database import get_session
 from core.security import (
     hash_password, verify_password, create_access_token,
-    generate_invitation_token, get_current_admin, get_current_user
+    get_current_user
 )
 
 router = APIRouter(tags=["Authentication"])
 
 
-# ==================================================================
-# ✅ GENERATE SLUG
-# ================================================================== 
+# ==========================================================
+# ✅ Generate a clean slug
+# ==========================================================
 def generate_slug(name: str) -> str:
-    """
-    Generate a clean, URL-safe slug from an organization name.
-    
-    This function normalizes the input string by converting it to lowercase,
-    removing special characters, replacing spaces with hyphens, and trimming
-    extra or trailing hyphens. The resulting slug is suitable for use in URLs
-    or unique organization identifiers and is limited to 50 characters.
-    """
     slug = name.lower()
-    slug = re.sub(r'[^a-z0-9\s-]', '', slug)  # Remove special characters
-    slug = re.sub(r'\s+', '-', slug)  # Replace spaces with hyphens
-    slug = re.sub(r'-+', '-', slug)  # Collapse multiple hyphens
-    slug = slug.strip('-')  # Trim leading/trailing hyphens
-    return slug[:50]  # Limit slug length to 50 characters
+    slug = re.sub(r"[^a-z0-9\s-]", "", slug)
+    slug = re.sub(r"\s+", "-", slug)
+    slug = re.sub(r"-+", "-", slug)
+    slug = slug.strip("-")
+    return slug[:50]
 
 
-# ==================================================================
-#  ✅ SIGNUP ROUTE WITH PROPER ERROR HANDLING
-# ================================================================== 
-
+# ==========================================================
+# ✅ Public Signup (creates org + admin)
+# ==========================================================
 @router.post("/signup")
 def public_signup(user_data: UserCreate, session: Session = Depends(get_session)):
-    """Public signup - user becomes Admin and creates their organization"""
+    """Public signup – creates new organization and admin user"""
     try:
-        print(f"📝 Signup attempt for: {user_data.email}")
-        
-        # Check if user already exists
-        existing_user = session.exec(select(User).where(User.email == user_data.email)).first()
-        if existing_user:
-            print(f" User already exists: {user_data.email}")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Email already registered."
-            )
+        print(f"📝 Signup attempt for {user_data.email}")
 
-        # Create organization name and slug
+        # No global email check (each org isolated)
         org_name = f"{user_data.full_name}'s Organization"
         org_slug = generate_slug(org_name)
-        
-        print(f" Creating organization: {org_name} (slug: {org_slug})")
-        
-        # Create a new organization for this user
-        organization = Organization(
-            name=org_name,
-            slug=org_slug,
-            created_at=datetime.utcnow()
-        )
+
+        organization = Organization(name=org_name, slug=org_slug)
         session.add(organization)
         session.commit()
         session.refresh(organization)
-        
-        print(f" Organization created with ID: {organization.id}")
 
-        # Create user
-        print(f"👤 Creating user: {user_data.full_name} ({user_data.email})")
-        
         new_user = User(
             full_name=user_data.full_name,
             email=user_data.email,
@@ -86,27 +54,21 @@ def public_signup(user_data: UserCreate, session: Session = Depends(get_session)
             is_invited=False,
             created_at=datetime.utcnow(),
         )
-        
         session.add(new_user)
         session.commit()
         session.refresh(new_user)
-        
-        print(f" User created with ID: {new_user.id}")
-        
-        # Create access token
+
         access_token = create_access_token(
             data={
                 "sub": new_user.email,
                 "role": new_user.role,
                 "user_id": new_user.id,
-                "organization_id": new_user.organization_id
+                "organization_id": new_user.organization_id,
             }
         )
-        
-        print(f" Token generated for user: {new_user.email}")
-        
-        # Return response
-        response_data = {
+        print(f"DEBUG: Generated JWT payload: sub={new_user.email}, role={new_user.role}, user_id={new_user.id}, organization_id={new_user.organization_id}")
+
+        return {
             "access_token": access_token,
             "token_type": "bearer",
             "user": {
@@ -115,100 +77,97 @@ def public_signup(user_data: UserCreate, session: Session = Depends(get_session)
                 "email": new_user.email,
                 "role": new_user.role,
                 "is_active": new_user.is_active,
-                "is_invited": new_user.is_invited,
                 "organization_id": new_user.organization_id,
-                "created_at": new_user.created_at.isoformat()
-            }
+                "created_at": new_user.created_at.isoformat(),
+            },
         }
-        
-        print(f" Signup successful for: {new_user.email}")
-        return response_data
-    
-    except HTTPException:
-        # Re-raise HTTP exceptions
-        raise
+
     except Exception as e:
-        # Catch any other errors and log them
-        print(f" SIGNUP ERROR: {type(e).__name__}: {str(e)}")
-        import traceback
-        traceback.print_exc()
         session.rollback()
+        print("❌ Signup error:", e)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Signup failed: {str(e)}"
+            status_code=500, detail=f"Signup failed: {str(e)}"
         )
 
 
-# ==================================================================
-#  ✅ LOGIN ROUTE
-# ================================================================== 
+# ==========================================================
+# ✅ Login (multi-tenant aware)
+# ==========================================================
 @router.post("/login")
-def login(user: UserLogin, session: Session = Depends(get_session)):
+def login(
+    user: UserLogin,
+    organization_slug: str = Query(None, description="Organization slug (optional)"),
+    session: Session = Depends(get_session),
+):
+    """Login for a specific organization using org slug or auto-detect"""
     try:
-        print(f" Login attempt for: {user.email}")
-        
-        db_user = session.exec(select(User).where(User.email == user.email)).first()
-        if not db_user:
-            print(f" User not found: {user.email}")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="No account found with this email."
+        # If organization_slug is not provided, try to find user's organization
+        if not organization_slug:
+            db_user = session.exec(
+                select(User).where(User.email == user.email)
+            ).first()
+            if not db_user:
+                raise HTTPException(status_code=404, detail="No account found with this email.")
+            org_id = db_user.organization_id
+        else:
+            # If organization_slug is provided, validate it
+            org = session.exec(
+                select(Organization).where(Organization.slug == organization_slug)
+            ).first()
+            if not org:
+                raise HTTPException(status_code=404, detail="Organization not found")
+            org_id = org.id
+
+        # Find user in the specific organization
+        db_user = session.exec(
+            select(User).where(
+                User.email == user.email,
+                User.organization_id == org_id,
             )
+        ).first()
+        
+        if not db_user:
+            raise HTTPException(status_code=404, detail="No user found for this organization")
 
         if not verify_password(user.password, db_user.password_hash):
-            print(f" Invalid password for: {user.email}")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="The password you entered is incorrect."
-            )
+            raise HTTPException(status_code=401, detail="Incorrect password")
 
         if not db_user.is_active:
-            print(f" Inactive account: {user.email}")
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Account is inactive. Contact admin."
-            )
+            raise HTTPException(status_code=403, detail="Account is inactive")
 
-        access_token = create_access_token(
+        token = create_access_token(
             data={
                 "sub": db_user.email,
                 "role": db_user.role,
                 "user_id": db_user.id,
-                "organization_id": db_user.organization_id
+                "organization_id": db_user.organization_id,
             }
         )
-        
-        print(f" Login successful for: {user.email}")
+        print(f"DEBUG: Generated JWT payload: sub={db_user.email}, role={db_user.role}, user_id={db_user.id}, organization_id={db_user.organization_id}")
 
         return {
-            "access_token": access_token,
+            "access_token": token,
             "token_type": "bearer",
             "user": {
                 "id": db_user.id,
-                "full_name": db_user.full_name or db_user.email.split("@")[0],
+                "full_name": db_user.full_name,
                 "email": db_user.email,
                 "role": db_user.role,
-                "is_active": db_user.is_active,
-                "is_invited": db_user.is_invited,
                 "organization_id": db_user.organization_id,
-                "created_at": db_user.created_at.isoformat()
-            }
+            },
         }
+
     except HTTPException:
         raise
     except Exception as e:
-        print(f" LOGIN ERROR: {type(e).__name__}: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Login failed: {str(e)}"
-        )
+        print("❌ Login error:", e)
+        raise HTTPException(status_code=500, detail=f"Login failed: {str(e)}")
 
-# ==================================================================
-#  ✅ GET CURRENT USER ENDPOINT
-# ================================================================== 
+
+# ==========================================================
+# ✅ Get current user from token
+# ==========================================================
 @router.get("/me", response_model=UserRead)
 def get_current_user_endpoint(current_user: User = Depends(get_current_user)):
-    """Get current user info from JWT token"""
+    """Return the authenticated user's info"""
     return current_user

@@ -10,7 +10,7 @@ psycopg2-binary
 # ---- Data Validation & Settings ----
 pydantic
 email-validator
-
+pydantic-settings
 # ---- Authentication & Security ----
 python-jose[cryptography]
 bcrypt>=4.1.2
