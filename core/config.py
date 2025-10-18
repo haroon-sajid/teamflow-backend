@@ -1,7 +1,7 @@
 # ================================================================
-# core/config.py — FastAPI Configuration (SendGrid + Pydantic v2)
+# core/config.py — FastAPI Configuration (Render + SendGrid + Pydantic v2)
 # ================================================================
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import EmailStr
 
 
@@ -35,8 +35,14 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"
     DEBUG: bool = True
 
-    class Config:
-        env_file = ".env"
+    # ------------------------
+    # Pydantic v2 Config
+    # ------------------------
+    model_config = SettingsConfigDict(
+        env_file=".env",          # Loads from local .env in development
+        env_file_encoding="utf-8",
+        extra="ignore"            # Ignores unknown env vars (e.g., Render defaults)
+    )
 
 
 # Global settings instance
