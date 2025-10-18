@@ -88,17 +88,17 @@ def public_signup(user_data: UserCreate, session: Session = Depends(get_session)
         if "uq_org_email" in error_msg:
             raise HTTPException(
                 status_code=400,
-                detail="A user with this email already exists in your organization. Please log in instead."
+                detail="An account with this email already exists. Please log in instead."
             )
         elif "uq_org_invite_email" in error_msg:
             raise HTTPException(
                 status_code=400,
-                detail="An invitation has already been sent to this email. Please check your inbox."
+                detail="An invitation has already been sent to this email."
             )
         else:
             raise HTTPException(
                 status_code=400,
-                detail="A data integrity issue occurred while creating your account. Please try again."
+                detail="We couldn’t complete your signup. Please try again."
             )
 
     except SQLAlchemyError as e:
@@ -106,7 +106,7 @@ def public_signup(user_data: UserCreate, session: Session = Depends(get_session)
         print("❌ Signup database error:", e)
         raise HTTPException(
             status_code=500,
-            detail="A server error occurred while creating your account. Please try again later."
+            detail="Something went wrong while creating your account. Please try again later."
         )
 
     except Exception as e:
@@ -114,7 +114,7 @@ def public_signup(user_data: UserCreate, session: Session = Depends(get_session)
         print("❌ Unexpected signup error:", e)
         raise HTTPException(
             status_code=500,
-            detail="An unexpected error occurred while creating your account. Please contact support."
+            detail="An unexpected error occurred. Please try again later."
         )
 
 
@@ -132,12 +132,12 @@ def login(
         if not organization_slug:
             db_user = session.exec(select(User).where(User.email == user.email)).first()
             if not db_user:
-                raise HTTPException(status_code=404, detail="No account found for this email address.")
+                raise HTTPException(status_code=404, detail="No account found with this email.")
             org_id = db_user.organization_id
         else:
             org = session.exec(select(Organization).where(Organization.slug == organization_slug)).first()
             if not org:
-                raise HTTPException(status_code=404, detail="The specified organization could not be found.")
+                raise HTTPException(status_code=404, detail="Organization not found.")
             org_id = org.id
 
         db_user = session.exec(
@@ -150,19 +150,19 @@ def login(
         if not db_user:
             raise HTTPException(
                 status_code=404,
-                detail="No user found with this email under the selected organization."
+                detail="No account found under this organization."
             )
 
         if not verify_password(user.password, db_user.password_hash):
             raise HTTPException(
                 status_code=401,
-                detail="Incorrect email or password. Please try again."
+                detail="Invalid email or password."
             )
 
         if not db_user.is_active:
             raise HTTPException(
                 status_code=403,
-                detail="Your account is currently inactive. Please contact your administrator."
+                detail="Your account is inactive. Please contact your admin."
             )
 
         token = create_access_token(
@@ -193,13 +193,13 @@ def login(
         print("❌ Login database error:", e)
         raise HTTPException(
             status_code=500,
-            detail="A server error occurred while processing your login. Please try again later."
+            detail="We’re having trouble logging you in. Please try again later."
         )
     except Exception as e:
         print("❌ Unexpected login error:", e)
         raise HTTPException(
             status_code=500,
-            detail="An unexpected error occurred while logging you in. Please contact support."
+            detail="Something went wrong while logging in. Please try again."
         )
 
 
