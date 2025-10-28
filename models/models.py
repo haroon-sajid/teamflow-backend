@@ -1,10 +1,8 @@
-
 from sqlmodel import SQLModel, Field, Relationship
 from typing import Optional, List
 from datetime import datetime, timedelta
 from enum import Enum
 from sqlalchemy import UniqueConstraint
-import uuid
 
 class UserRole(str, Enum):
     SUPER_ADMIN = "super_admin"
@@ -26,18 +24,35 @@ class Organization(SQLModel, table=True):
     tasks: List["Task"] = Relationship(back_populates="organization")
     invitations: List["Invitation"] = Relationship(back_populates="organization")
 
+
 class User(SQLModel, table=True):
     __table_args__ = (UniqueConstraint("organization_id", "email", name="uq_org_email"),)
 
     id: Optional[int] = Field(default=None, primary_key=True)
     full_name: str = Field(max_length=100)
-    email: str = Field(index=True, max_length=100, nullable=False)  # removed unique=True
+    email: str = Field(index=True, max_length=100, nullable=False)
+    username: Optional[str] = Field(default=None, max_length=50, index=True)
     password_hash: str = Field(nullable=False)
     role: str = Field(default=UserRole.MEMBER.value, max_length=20, index=True)
     is_active: bool = Field(default=True)
     is_invited: bool = Field(default=False)
     created_at: datetime = Field(default_factory=datetime.utcnow)
+    date_joined: datetime = Field(default_factory=datetime.utcnow)
 
+    # -----------------------
+    # Profile Fields
+    # -----------------------
+    department: Optional[str] = None
+    job_title: Optional[str] = None
+    profile_picture: Optional[str] = None  # store path or URL
+    phone_number: Optional[str] = None
+    time_zone: Optional[str] = None
+    bio: Optional[str] = None
+    skills: Optional[str] = None  # JSON array or comma-separated string
+
+    # -----------------------
+    # Relations
+    # -----------------------
     organization_id: Optional[int] = Field(default=None, foreign_key="organization.id")
     organization: Optional[Organization] = Relationship(back_populates="users")
 
@@ -46,6 +61,7 @@ class User(SQLModel, table=True):
     sent_invitations: List["Invitation"] = Relationship(back_populates="sent_by")
     comments: List["TaskComment"] = Relationship(back_populates="user")
     work_logs: List["TaskWorkLog"] = Relationship(back_populates="user")
+
 
 class Project(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -59,6 +75,7 @@ class Project(SQLModel, table=True):
 
     creator: User = Relationship(back_populates="projects")
     tasks: List["Task"] = Relationship(back_populates="project")
+
 
 class Task(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -79,6 +96,7 @@ class Task(SQLModel, table=True):
     comments: List["TaskComment"] = Relationship(back_populates="task")
     work_logs: List["TaskWorkLog"] = Relationship(back_populates="task")
 
+
 class TaskComment(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     task_id: int = Field(foreign_key="task.id")
@@ -88,6 +106,7 @@ class TaskComment(SQLModel, table=True):
 
     task: Task = Relationship(back_populates="comments")
     user: User = Relationship(back_populates="comments")
+
 
 class TaskWorkLog(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -100,6 +119,7 @@ class TaskWorkLog(SQLModel, table=True):
 
     task: Task = Relationship(back_populates="work_logs")
     user: User = Relationship(back_populates="work_logs")
+
 
 class Invitation(SQLModel, table=True):
     __table_args__ = (UniqueConstraint("organization_id", "email", name="uq_org_invite_email"),)

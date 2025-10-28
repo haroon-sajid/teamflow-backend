@@ -28,6 +28,7 @@ class UserRead(BaseModel):
     id: int
     full_name: str
     email: str
+    username: Optional[str] = None   # ✅ add this
     role: str
     is_active: bool
     is_invited: bool
@@ -35,7 +36,6 @@ class UserRead(BaseModel):
     organization_id: Optional[int] = None
 
     model_config = ConfigDict(from_attributes=True)
-
 
 # -------------------------------------------------------
 # ✏️ Update
@@ -45,7 +45,6 @@ class UserUpdate(BaseModel):
     email: Optional[EmailStr] = None
     role: Optional[str] = None
     is_active: Optional[bool] = None
-
 
 # -------------------------------------------------------
 # ✉️ Invitation

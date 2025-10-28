@@ -1,57 +1,20 @@
 import os
 from dotenv import load_dotenv
-from fastapi import FastAPI, APIRouter, HTTPException, Depends
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from sqlmodel import Session, select
 from contextlib import asynccontextmanager
 
-from core.database import create_db_and_tables, get_session
-from core.security import get_current_user, get_current_admin
-from models.models import User, UserRole
-
+from core.database import create_db_and_tables
 from routes.auth import router as auth_router
 from routes.projects import router as project_router
-from routes.tasks import router as tasks_router  
+from routes.tasks import router as tasks_router
 from routes.invitation import router as invitation_router
+from routes.users import router as users_router      
+from routes.profile import router as profile_router  
+from fastapi.staticfiles import StaticFiles
 
 # =========================================
-# 🧩 Users Router
-# =========================================
-users_router = APIRouter(prefix="/users", tags=["Users"])
-
-@users_router.get("/", response_model=list[User])
-def get_all_users(
-    current_user: User = Depends(get_current_admin),
-    session: Session = Depends(get_session)
-):
-    """Get all users in the same organization (admin only)."""
-    users = session.exec(
-        select(User).where(User.organization_id == current_user.organization_id)
-    ).all()
-    return users
-
-@users_router.get("/{user_id}", response_model=User)
-def get_user(
-    user_id: int,
-    current_user: User = Depends(get_current_user),
-    session: Session = Depends(get_session)
-):
-    """Get specific user within your organization."""
-    user = session.get(User, user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    if user.organization_id != current_user.organization_id:
-        raise HTTPException(status_code=403, detail="Unauthorized for this organization")
-
-    if current_user.role == UserRole.MEMBER and current_user.id != user_id:
-        raise HTTPException(status_code=403, detail="You can only view your own profile")
-
-    return user
-
-
-# =========================================
-# 🏁 Lifespan
+# 🏁 Lifespan (DB initialization)
 # =========================================
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -80,14 +43,20 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 # =========================================
 # 📦 Routers
 # =========================================
 app.include_router(auth_router, prefix="/auth", tags=["Authentication"])
 app.include_router(project_router, prefix="/projects", tags=["Projects"])
 app.include_router(tasks_router, prefix="/tasks", tags=["Tasks"])
-app.include_router(users_router, tags=["Users"])
+app.include_router(users_router, prefix="/users", tags=["Users"])       
 app.include_router(invitation_router, prefix="/auth", tags=["Invitations"])
+app.include_router(profile_router, tags=["Profile"]) 
+
+# ✅ FIX: Correct static file serving for profile pictures
+# Serve the entire uploads directory at /static
+app.mount("/static", StaticFiles(directory="uploads"), name="static")
 
 # =========================================
 # 🩺 Health Check
@@ -95,6 +64,7 @@ app.include_router(invitation_router, prefix="/auth", tags=["Invitations"])
 @app.get("/health")
 def health_check():
     return {"status": "ok", "message": "Backend is running"}
+
 
 @app.get("/")
 def read_root():

@@ -26,6 +26,8 @@ router = APIRouter(tags=["Invitations"])
 
 # Default frontend url (production) but allow override via env
 DEFAULT_FRONTEND_URL = "https://teamflow-frontend.onrender.com"
+
+# DEFAULT_FRONTEND_URL = "http://localhost:5173"
 FRONTEND_URL = os.getenv("FRONTEND_URL", DEFAULT_FRONTEND_URL)
 
 INVITATION_VALID_DAYS = int(os.getenv("INVITATION_VALID_DAYS", "7"))  # used for DB expire field

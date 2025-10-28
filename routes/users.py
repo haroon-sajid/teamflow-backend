@@ -10,7 +10,7 @@ from schemas.user_schema import UserCreate, UserRead, UserUpdate
 from core.database import get_session
 from core.security import get_current_user, get_current_admin
 
-router = APIRouter(prefix="/users", tags=["Users"])
+router = APIRouter(tags=["Users"])
 
 
 # ----------------------------------------------------------------------
@@ -259,3 +259,4 @@ def get_organization_members(
         )
     ).all()
     return members
+
