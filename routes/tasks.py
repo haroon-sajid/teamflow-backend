@@ -2,13 +2,26 @@
 from fastapi import APIRouter, HTTPException, Depends, status
 from sqlmodel import Session, select
 from typing import List, Optional
-from sqlmodel import delete
-from datetime import datetime, date
+from datetime import datetime
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+
 from core.database import get_session
-from models.models import Task, Project, User, TaskMemberLink, UserRole, TaskComment, TaskWorkLog
-from schemas.task_schema import TaskCreate, TaskUpdate, TaskOut, TaskPermissionUpdate, CommentCreate, CommentOut, WorkLogCreate, WorkLogOut
-from core.security import get_current_user, get_current_admin, get_current_member
+from models.models import (
+    Task, Project, User, TaskMemberLink, UserRole, 
+    TaskComment, TaskWorkLog, Organization
+)
+from core.security import get_current_user, get_current_admin
+
+from schemas.task_schema import (
+    TaskCreate,
+    TaskUpdate,
+    TaskRead as TaskOut,
+    CommentCreate,
+    CommentRead as CommentOut,
+    WorkLogCreate,
+    WorkLogRead as WorkLogOut
+)
+
 
 router = APIRouter(tags=["Tasks"])
 
@@ -27,8 +40,27 @@ def _is_user_assigned_to_task(session: Session, user_id: int, task_id: int) -> b
 
 
 # ============================================================================
+#  ✅ Helper function to check task access
+# ============================================================================
+def _check_task_access(session: Session, task: Task, current_user: User) -> bool:
+    """Check if user has access to the task"""
+    if task.organization_id != current_user.organization_id:
+        return False
+    
+    if current_user.role in [UserRole.ADMIN.value, UserRole.SUPER_ADMIN.value]:
+        return True
+    
+    # For members, check if they're assigned to the task
+    if current_user.role == UserRole.MEMBER.value:
+        return _is_user_assigned_to_task(session, current_user.id, task.id)
+    
+    return False
+
+
+# ============================================================================
 #  ✅ Create New Task with Organization
 # ============================================================================
+
 @router.post("/", response_model=TaskOut, status_code=201)
 def create_task(
     payload: TaskCreate,
@@ -38,139 +70,98 @@ def create_task(
     """
     Create a new task.
     Only admins can create tasks.
+    Includes project_name in response.
     """
-    # Validate project exists and belongs to user's organization
+    # --- Validate project ownership ---
     project = session.exec(
         select(Project).where(
             Project.id == payload.project_id,
             Project.organization_id == current_user.organization_id
         )
     ).first()
-    
+
     if not project:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Project not found or not in your organization"
         )
 
-    # Determine which members to assign
-    member_ids_to_assign = []
-    if payload.member_ids and len(payload.member_ids) > 0:
-        member_ids_to_assign = payload.member_ids
-    elif payload.member_id is not None:
-        member_ids_to_assign = [payload.member_id]
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Either member_id or member_ids must be provided"
-        )
-
-    # Validate all members exist and belong to the same organization
-    if member_ids_to_assign:
-        members = session.exec(
-            select(User).where(
-                User.id.in_(member_ids_to_assign),
-                User.organization_id == current_user.organization_id
-            )
-        ).all()
-        
-        if len(members) != len(member_ids_to_assign):
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="One or more members not found or not in your organization"
-            )
-
-    # Handle date conversion for due_date
-    parsed_due_date = None
-    if payload.due_date:
-        if isinstance(payload.due_date, str):
-            try:
-                # Parse the 'YYYY-MM-DD' string into a Python date object
-                parsed_due_date = date.fromisoformat(payload.due_date)
-            except ValueError:
-                raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                    detail=f"Invalid date format for due_date '{payload.due_date}'. Expected YYYY-MM-DD."
-                )
-        elif isinstance(payload.due_date, (date, datetime)):
-            # If it's already a date/datetime object
-            parsed_due_date = payload.due_date if isinstance(payload.due_date, date) else payload.due_date.date()
-        else:
-            # Unexpected type for due_date
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=f"Invalid type for due_date: {type(payload.due_date)}"
-            )
-
-    # Create the task
+    # --- Create task ---
     task = Task(
         title=payload.title,
         description=payload.description,
         status=payload.status,
         priority=payload.priority,
-        due_date=parsed_due_date,
+        due_date=payload.due_date,
         project_id=payload.project_id,
         organization_id=current_user.organization_id,
-        allow_member_edit=payload.allow_member_edit
+        allow_member_edit=payload.allow_member_edit,
     )
+
     try:
         session.add(task)
         session.commit()
         session.refresh(task)
-    except IntegrityError as e:
+
+        # --- Handle member assignment ---
+        member_ids = payload.member_ids or []
+        if member_ids:
+            valid_member_ids = []
+            for member_id in member_ids:
+                member = session.exec(
+                    select(User).where(
+                        User.id == member_id,
+                        User.organization_id == current_user.organization_id
+                    )
+                ).first()
+                if member:
+                    task_member_link = TaskMemberLink(
+                        task_id=task.id,
+                        user_id=member_id,
+                        organization_id=current_user.organization_id,
+                    )
+                    session.add(task_member_link)
+                    valid_member_ids.append(member_id)
+            session.commit()
+        else:
+            valid_member_ids = []
+
+        # --- Build and return response ---
+        project_name = project.title if project else None
+
+        response_data = {
+            **task.dict(),
+            "member_ids": valid_member_ids,
+            "project_name": project_name,
+        }
+
+        return TaskOut.from_orm(task)
+
+
+    except IntegrityError:
         session.rollback()
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="A database constraint was violated while creating the task."
         )
-    except SQLAlchemyError as e:
+    except SQLAlchemyError:
         session.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="A database error occurred while creating the task."
         )
 
-    # Assign members to the task
-    if member_ids_to_assign:
-        for member_id in member_ids_to_assign:
-            link = TaskMemberLink(task_id=task.id, user_id=member_id)
-            session.add(link)
-        session.commit()
-
-    # Refresh task to get the relationships
-    session.refresh(task)
-    
-    # Get project name for response
-    project_name = project.name
-    
-    # Get member names for response
-    member_names = [member.full_name for member in members] if members else []
-    
-    # Return enhanced task object
-    return TaskOut(
-        id=task.id,
-        title=task.title,
-        description=task.description,
-        status=task.status,
-        priority=task.priority,
-        due_date=task.due_date,
-        project_id=task.project_id,
-        organization_id=task.organization_id,
-        allow_member_edit=task.allow_member_edit,
-        created_at=task.created_at,
-        member_ids=member_ids_to_assign,
-        project_name=project_name,
-        member_names=member_names
-    )
-
 
 # ============================================================================
 #  ✅ Get All Tasks (Organization-scoped)
 # ============================================================================
+
 @router.get("/", response_model=List[TaskOut])
 def get_tasks(
+    project_id: Optional[int] = None,
+    status_filter: Optional[str] = None,
     current_user: User = Depends(get_current_user),
-    session: Session = Depends(get_session)
+    session: Session = Depends(get_session),
 ):
     """
     Retrieve all tasks for the current user's organization.
@@ -179,61 +170,56 @@ def get_tasks(
     """
     organization_id = current_user.organization_id
 
-    # Fetch tasks based on user role
+    # --- Base query ---
     if current_user.role in [UserRole.ADMIN.value, UserRole.SUPER_ADMIN.value]:
-        tasks = session.exec(
-            select(Task).where(Task.organization_id == organization_id)
-        ).all()
+        query = select(Task).where(Task.organization_id == organization_id)
     else:
-        tasks = session.exec(
+        query = (
             select(Task)
             .join(TaskMemberLink)
             .where(
                 Task.organization_id == organization_id,
-                TaskMemberLink.user_id == current_user.id
-            )
-        ).all()
-
-    # Enhance tasks with project & member details
-    enhanced_tasks = []
-    for task in tasks:
-        # Get project name
-        project = session.get(Project, task.project_id)
-        project_name = project.name if project else None
-
-        # Get assigned members
-        member_links = session.exec(
-            select(TaskMemberLink).where(TaskMemberLink.task_id == task.id)
-        ).all()
-        member_ids = [link.user_id for link in member_links]
-
-        member_names = []
-        if member_ids:
-            members = session.exec(
-                select(User).where(User.id.in_(member_ids))
-            ).all()
-            member_names = [member.full_name for member in members]
-
-        enhanced_tasks.append(
-            TaskOut(
-                id=task.id,
-                title=task.title,
-                description=task.description,
-                status=task.status,
-                priority=task.priority,
-                due_date=task.due_date,
-                project_id=task.project_id,
-                organization_id=task.organization_id,
-                allow_member_edit=task.allow_member_edit,
-                created_at=task.created_at,
-                member_ids=member_ids,
-                project_name=project_name,
-                member_names=member_names,
+                TaskMemberLink.user_id == current_user.id,
             )
         )
 
-    return enhanced_tasks
+    # --- Filters ---
+    if project_id:
+        query = query.where(Task.project_id == project_id)
+    if status_filter:
+        query = query.where(Task.status == status_filter)
 
+    query = query.order_by(Task.created_at.desc())
+    tasks = session.exec(query).all()
+
+    if not tasks:
+        return []
+
+    # --- Prefetch related projects to avoid N+1 ---
+    project_ids = {t.project_id for t in tasks}
+    projects = session.exec(select(Project).where(Project.id.in_(project_ids))).all()
+    project_map = {p.id: p.title for p in projects}
+
+    # --- Build response ---
+    task_out_list = []
+    for task in tasks:
+        project_name = project_map.get(task.project_id)
+        # Ensure member_ids are included (if Task has a relationship or link table)
+        member_links = session.exec(
+            select(TaskMemberLink.user_id).where(TaskMemberLink.task_id == task.id)
+        ).all()
+        member_ids = [m[0] if isinstance(m, tuple) else m for m in member_links]
+
+        task_out = TaskOut.model_validate(
+            {
+                **task.dict(),
+                "member_ids": member_ids,
+                "project_name": project_name,
+            }
+        )
+        task_out_list.append(task_out)
+
+    return task_out_list
 
 
 # ============================================================================
@@ -257,60 +243,21 @@ def get_task(
             detail="Task not found"
         )
 
-    # Check organization access
-    if task.organization_id != current_user.organization_id:
+    # Check access permissions
+    if not _check_task_access(session, task, current_user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You don't have access to this task"
         )
 
-    # For members, check if they're assigned to the task
-    if current_user.role == UserRole.MEMBER.value:
-        if not _is_user_assigned_to_task(session, current_user.id, task_id):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="You don't have access to this task"
-            )
-
-    # Get project name
-    project = session.get(Project, task.project_id)
-    project_name = project.name if project else None
-    
-    # Get member IDs and names
-    member_links = session.exec(
-        select(TaskMemberLink).where(TaskMemberLink.task_id == task.id)
-    ).all()
-    member_ids = [link.user_id for link in member_links]
-    
-    member_names = []
-    if member_ids:
-        members = session.exec(
-            select(User).where(User.id.in_(member_ids))
-        ).all()
-        member_names = [member.full_name for member in members]
-
-    return TaskOut(
-        id=task.id,
-        title=task.title,
-        description=task.description,
-        status=task.status,
-        priority=task.priority,
-        due_date=task.due_date,
-        project_id=task.project_id,
-        organization_id=task.organization_id,
-        allow_member_edit=task.allow_member_edit,
-        created_at=task.created_at,
-        member_ids=member_ids,
-        project_name=project_name,
-        member_names=member_names
-    )
-
+    return TaskOut.model_validate(task)
 
 
 # ============================================================================
 #   ✅ Update Task
 # ============================================================================
 
+# In tasks.py - FIXED update_task function
 @router.put("/{task_id}", response_model=TaskOut)
 def update_task(
     task_id: int,
@@ -330,8 +277,8 @@ def update_task(
             detail="Task not found"
         )
     
-    #  Check if task belongs to user's organization
-    if task.organization_id != current_user.organization_id:
+    # Check access permissions
+    if not _check_task_access(session, task, current_user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to update this task"
@@ -340,18 +287,11 @@ def update_task(
     # For members, restrict what they can update
     is_admin_user = current_user.role in [UserRole.ADMIN.value, UserRole.SUPER_ADMIN.value]
     if not is_admin_user:
-        # Check if member is assigned to this task
-        has_access = session.exec(
-            select(TaskMemberLink).where(
-                TaskMemberLink.task_id == task_id,
-                TaskMemberLink.user_id == current_user.id
-            )
-        ).first()
-        
-        if not has_access:
+        # Check if task allows member editing
+        if not task.allow_member_edit:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="You can only update your own tasks"
+                detail="This task does not allow member editing"
             )
         
         # Allow only status update for members
@@ -363,51 +303,39 @@ def update_task(
                 detail="Members can only update task status"
             )
     
-    # Handle member assignment updates (only admins can do this)
-    if (payload.member_ids is not None or payload.member_id is not None) and not is_admin_user:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only admins can update task assignments"
-        )
+    # Update task fields
+    update_data = payload.dict(exclude_unset=True, exclude={'member_ids'})
+    for key, value in update_data.items():
+        setattr(task, key, value)
     
-    if payload.member_ids is not None or payload.member_id is not None:
-        # Clear existing assignments
+    # ✅ FIXED: Handle member updates (only for admins)
+    if is_admin_user and 'member_ids' in payload.dict(exclude_unset=True):
+        member_ids = payload.member_ids or []
+        
+        # Remove existing member links using proper SQLModel approach
         existing_links = session.exec(
             select(TaskMemberLink).where(TaskMemberLink.task_id == task_id)
         ).all()
         for link in existing_links:
             session.delete(link)
         
-        # Determine new member assignments
-        member_ids_to_assign = []
-        if payload.member_ids is not None:
-            member_ids_to_assign = payload.member_ids
-        elif payload.member_id is not None:
-            member_ids_to_assign = [payload.member_id]
-        
-        # Validate and create new assignments
-        if member_ids_to_assign:
-            members = session.exec(
+        # Add new member links
+        for member_id in member_ids:
+            # Verify member belongs to the same organization
+            member = session.exec(
                 select(User).where(
-                    User.id.in_(member_ids_to_assign),
+                    User.id == member_id,
                     User.organization_id == current_user.organization_id
                 )
-            ).all()
+            ).first()
             
-            if len(members) != len(member_ids_to_assign):
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="One or more members not found or not in your organization"
+            if member:
+                task_member_link = TaskMemberLink(
+                    task_id=task_id,
+                    user_id=member_id,
+                    organization_id=current_user.organization_id
                 )
-            
-            for member_id in member_ids_to_assign:
-                link = TaskMemberLink(task_id=task_id, user_id=member_id)
-                session.add(link)
-    
-    # Update other fields
-    update_data = payload.dict(exclude_unset=True, exclude={'member_id', 'member_ids'})
-    for key, value in update_data.items():
-        setattr(task, key, value)
+                session.add(task_member_link)
     
     try:
         session.add(task)
@@ -426,16 +354,7 @@ def update_task(
             detail="A database error occurred while updating the task."
         )
     
-    # Prepare response with member information
-    member_ids = session.exec(
-        select(TaskMemberLink.user_id).where(TaskMemberLink.task_id == task.id)
-    ).all()
-    
-    task_out = TaskOut.model_validate(task)
-    task_out.member_ids = member_ids
-    return task_out
-
-
+    return TaskOut.model_validate(task)
 
 # ============================================================================
 #   ✅ Delete Task
@@ -449,8 +368,7 @@ def delete_task(
     """
     Delete a task.
     Only admins can delete tasks.
-    This will also remove related TaskComment, TaskWorkLog and TaskMemberLink rows
-    to avoid FK/NOT NULL integrity errors.
+    This will also remove related TaskComment, TaskWorkLog and TaskMemberLink rows.
     """
     task = session.get(Task, task_id)
     if not task:
@@ -467,18 +385,31 @@ def delete_task(
         )
 
     try:
-        # Delete related comments
-        session.exec(delete(TaskComment).where(TaskComment.task_id == task.id))
+        # Delete related comments using proper SQLModel approach
+        comments = session.exec(
+            select(TaskComment).where(TaskComment.task_id == task_id)
+        ).all()
+        for comment in comments:
+            session.delete(comment)
 
         # Delete related work logs
-        session.exec(delete(TaskWorkLog).where(TaskWorkLog.task_id == task.id))
+        work_logs = session.exec(
+            select(TaskWorkLog).where(TaskWorkLog.task_id == task_id)
+        ).all()
+        for work_log in work_logs:
+            session.delete(work_log)
 
         # Delete task-member links
-        session.exec(delete(TaskMemberLink).where(TaskMemberLink.task_id == task.id))
+        member_links = session.exec(
+            select(TaskMemberLink).where(TaskMemberLink.task_id == task_id)
+        ).all()
+        for link in member_links:
+            session.delete(link)
 
         # Finally delete the task itself
         session.delete(task)
         session.commit()
+        
     except IntegrityError as e:
         session.rollback()
         raise HTTPException(
@@ -491,82 +422,69 @@ def delete_task(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="A database error occurred while deleting the task."
         )
-    except Exception as e:
-        session.rollback()
-        print("Error deleting task:", e)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An unexpected error occurred while deleting the task."
-        )
 
 
 # ============================================================================
-#  ✅ Member: Update task status only
+#  ✅ Assign Members to Task
 # ============================================================================
-@router.patch("/{task_id}/status", response_model=TaskOut)
-def update_task_status(
+@router.post("/{task_id}/assign", response_model=TaskOut)
+def assign_members_to_task(
     task_id: int,
-    payload: dict,
-    current_user: User = Depends(get_current_user),
+    member_ids: List[int],
+    current_user: User = Depends(get_current_admin),
     session: Session = Depends(get_session)
 ):
     """
-    Allow members to update only the status of their assigned tasks.
-    Admins can use this too.
+    Assign members to a task.
+    Only admins can assign members to tasks.
     """
     task = session.get(Task, task_id)
     if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Task not found"
+        )
 
-    # Check organization
+    # Check organization access
     if task.organization_id != current_user.organization_id:
-        raise HTTPException(status_code=403, detail="You don't have access to this task")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have access to this task"
+        )
 
-    # Check role
-    if current_user.role == UserRole.MEMBER.value:
-        if not _is_user_assigned_to_task(session, current_user.id, task_id):
-            raise HTTPException(status_code=403, detail="You are not assigned to this task")
+    # Remove existing assignments using proper SQLModel approach
+    existing_links = session.exec(
+        select(TaskMemberLink).where(TaskMemberLink.task_id == task_id)
+    ).all()
+    for link in existing_links:
+        session.delete(link)
 
-    # Only update status
-    new_status = payload.get("status")
-    if not new_status:
-        raise HTTPException(status_code=400, detail="Missing status field")
+    # Add new assignments
+    for member_id in member_ids:
+        # Verify member belongs to the same organization
+        member = session.exec(
+            select(User).where(
+                User.id == member_id,
+                User.organization_id == current_user.organization_id
+            )
+        ).first()
+        
+        if member:
+            task_member_link = TaskMemberLink(
+                task_id=task_id,
+                user_id=member_id,
+                organization_id=current_user.organization_id
+            )
+            session.add(task_member_link)
 
-    task.status = new_status
     session.commit()
     session.refresh(task)
 
-    # Get project name
-    project = session.get(Project, task.project_id)
-    project_name = project.name if project else None
-
-    # Get members
-    member_links = session.exec(
-        select(TaskMemberLink).where(TaskMemberLink.task_id == task.id)
-    ).all()
-    member_ids = [link.user_id for link in member_links]
-    members = session.exec(select(User).where(User.id.in_(member_ids))).all()
-    member_names = [m.full_name for m in members]
-
-    return TaskOut(
-        id=task.id,
-        title=task.title,
-        description=task.description,
-        status=task.status,
-        priority=task.priority,
-        due_date=task.due_date,
-        project_id=task.project_id,
-        organization_id=task.organization_id,
-        allow_member_edit=task.allow_member_edit,
-        created_at=task.created_at,
-        member_ids=member_ids,
-        project_name=project_name,
-        member_names=member_names
-    )
+    return TaskOut.model_validate(task)
 
 
 # ============================================================================
-#  ✅ GET TASL COMMENTS
+#  ✅ GET TASK COMMENTS
 # ============================================================================
 @router.get("/{task_id}/comments", response_model=List[CommentOut])
 def get_task_comments(
@@ -586,18 +504,11 @@ def get_task_comments(
         )
 
     # Check access permissions
-    if task.organization_id != current_user.organization_id:
+    if not _check_task_access(session, task, current_user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You don't have access to this task"
         )
-
-    if current_user.role == UserRole.MEMBER:
-        if not _is_user_assigned_to_task(session, current_user.id, task_id):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="You don't have access to this task"
-            )
 
     comments = session.exec(
         select(TaskComment)
@@ -605,23 +516,7 @@ def get_task_comments(
         .order_by(TaskComment.created_at.desc())
     ).all()
 
-    # Enhance comments with user names
-    enhanced_comments = []
-    for comment in comments:
-        user = session.get(User, comment.user_id)
-        user_name = user.full_name if user else "Unknown User"
-        
-        enhanced_comment = CommentOut(
-            id=comment.id,
-            task_id=comment.task_id,
-            user_id=comment.user_id,
-            message=comment.message,
-            created_at=comment.created_at,
-            user_name=user_name
-        )
-        enhanced_comments.append(enhanced_comment)
-
-    return enhanced_comments
+    return [CommentOut.model_validate(comment) for comment in comments]
 
 
 # ============================================================================
@@ -646,36 +541,24 @@ def create_task_comment(
         )
 
     # Check access permissions
-    if task.organization_id != current_user.organization_id:
+    if not _check_task_access(session, task, current_user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You don't have access to this task"
         )
 
-    if current_user.role == UserRole.MEMBER.value:
-        if not _is_user_assigned_to_task(session, current_user.id, task_id):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="You don't have access to this task"
-            )
-
     comment = TaskComment(
         task_id=task_id,
         user_id=current_user.id,
-        message=payload.message
+        message=payload.message,
+        organization_id=current_user.organization_id
     )
+    
     session.add(comment)
     session.commit()
     session.refresh(comment)
 
-    return CommentOut(
-        id=comment.id,
-        task_id=comment.task_id,
-        user_id=comment.user_id,
-        message=comment.message,
-        created_at=comment.created_at,
-        user_name=current_user.full_name
-    )
+    return CommentOut.model_validate(comment)
 
 
 # ============================================================================
@@ -699,18 +582,11 @@ def get_task_work_logs(
         )
 
     # Check access permissions
-    if task.organization_id != current_user.organization_id:
+    if not _check_task_access(session, task, current_user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You don't have access to this task"
         )
-
-    if current_user.role == UserRole.MEMBER.value:
-        if not _is_user_assigned_to_task(session, current_user.id, task_id):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="You don't have access to this task"
-            )
 
     work_logs = session.exec(
         select(TaskWorkLog)
@@ -718,25 +594,7 @@ def get_task_work_logs(
         .order_by(TaskWorkLog.date.desc())
     ).all()
 
-    # Enhance work logs with user names
-    enhanced_work_logs = []
-    for work_log in work_logs:
-        user = session.get(User, work_log.user_id)
-        user_name = user.full_name if user else "Unknown User"
-        
-        enhanced_work_log = WorkLogOut(
-            id=work_log.id,
-            task_id=work_log.task_id,
-            user_id=work_log.user_id,
-            hours=work_log.hours,
-            date=work_log.date,
-            description=work_log.description,
-            created_at=work_log.created_at,
-            user_name=user_name
-        )
-        enhanced_work_logs.append(enhanced_work_log)
-
-    return enhanced_work_logs
+    return [WorkLogOut.model_validate(work_log) for work_log in work_logs]
 
 
 # ============================================================================
@@ -761,59 +619,121 @@ def create_task_work_log(
         )
 
     # Check access permissions
-    if task.organization_id != current_user.organization_id:
+    if not _check_task_access(session, task, current_user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You don't have access to this task"
         )
-
-    if current_user.role == UserRole.MEMBER.value:
-        if not _is_user_assigned_to_task(session, current_user.id, task_id):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="You don't have access to this task"
-            )
-
-    # Handle date
-    log_date = payload.date or datetime.utcnow()
 
     work_log = TaskWorkLog(
         task_id=task_id,
         user_id=current_user.id,
         hours=payload.hours,
         description=payload.description,
-        date=log_date
+        date=payload.date or datetime.utcnow(),
+        organization_id=current_user.organization_id
     )
+    
     session.add(work_log)
     session.commit()
     session.refresh(work_log)
 
-    return WorkLogOut(
-        id=work_log.id,
-        task_id=work_log.task_id,
-        user_id=work_log.user_id,
-        hours=work_log.hours,
-        date=work_log.date,
-        description=work_log.description,
-        created_at=work_log.created_at,
-        user_name=current_user.full_name
-    )
-
+    return WorkLogOut.model_validate(work_log)
 
 
 # ============================================================================
-#  ✅ Toggle Task Permission
+# ✅ DELETE TASK COMMENT
 # ============================================================================
-@router.patch("/{task_id}/permission", response_model=TaskOut)
-def toggle_task_permission(
-    task_id: int,
-    payload: TaskPermissionUpdate,
-    current_user: User = Depends(get_current_admin),
+@router.delete("/comments/{comment_id}", status_code=204)
+def delete_task_comment(
+    comment_id: int,
+    current_user: User = Depends(get_current_user),
     session: Session = Depends(get_session)
 ):
     """
-    Toggle member edit permission for a task.
-    Only admins can change task permissions.
+    Delete a task comment.
+    Users can only delete their own comments.
+    Admins can delete any comment in their organization.
+    """
+    comment = session.get(TaskComment, comment_id)
+    if not comment:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Comment not found"
+        )
+
+    # Check organization access
+    if comment.organization_id != current_user.organization_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have access to this comment"
+        )
+
+    # Check if user owns the comment or is admin
+    is_admin = current_user.role in [UserRole.ADMIN.value, UserRole.SUPER_ADMIN.value]
+    if not is_admin and comment.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only delete your own comments"
+        )
+
+    session.delete(comment)
+    session.commit()
+
+
+# ============================================================================
+# ✅ DELETE TASK WORK LOG
+# ============================================================================
+@router.delete("/worklogs/{worklog_id}", status_code=204)
+def delete_task_work_log(
+    worklog_id: int,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
+):
+    """
+    Delete a task work log.
+    Users can only delete their own work logs.
+    Admins can delete any work log in their organization.
+    """
+    work_log = session.get(TaskWorkLog, worklog_id)
+    if not work_log:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Work log not found"
+        )
+
+    # Check organization access
+    if work_log.organization_id != current_user.organization_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have access to this work log"
+        )
+
+    # Check if user owns the work log or is admin
+    is_admin = current_user.role in [UserRole.ADMIN.value, UserRole.SUPER_ADMIN.value]
+    if not is_admin and work_log.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only delete your own work logs"
+        )
+
+    session.delete(work_log)
+    session.commit()
+
+
+# ============================================================================
+#  ✅ Update Task Status Only (for drag/drop and member updates)
+# ============================================================================
+@router.patch("/{task_id}/status", response_model=TaskOut)
+def update_task_status(
+    task_id: int,
+    status: str,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
+):
+    """
+    Update only the status of a task.
+    Members can use this endpoint to update task status even if allow_member_edit is False.
     """
     task = session.get(Task, task_id)
     if not task:
@@ -822,46 +742,151 @@ def toggle_task_permission(
             detail="Task not found"
         )
 
-    # Check organization access
-    if task.organization_id != current_user.organization_id:
+    # Check access permissions
+    if not _check_task_access(session, task, current_user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="You don't have access to this task"
+            detail="Not authorized to update this task"
         )
 
-    task.allow_member_edit = payload.allow_member_edit
-    session.commit()
-    session.refresh(task)
+    # Update only the status
+    task.status = status
 
-    # Get project name
-    project = session.get(Project, task.project_id)
-    project_name = project.name if project else None
-    
-    # Get member IDs and names
-    member_links = session.exec(
-        select(TaskMemberLink).where(TaskMemberLink.task_id == task.id)
-    ).all()
-    member_ids = [link.user_id for link in member_links]
-    
-    member_names = []
-    if member_ids:
-        members = session.exec(
-            select(User).where(User.id.in_(member_ids))
+    try:
+        session.add(task)
+        session.commit()
+        session.refresh(task)
+    except SQLAlchemyError as e:
+        session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="A database error occurred while updating the task status."
+        )
+
+    return TaskOut.model_validate(task)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Add to routes/tasks.py after the existing imports
+from schemas.task_schema import TaskSearchSchema
+from sqlmodel import and_, or_
+
+# Add this endpoint after the existing task routes
+@router.post("/search", response_model=List[TaskOut])
+def search_tasks(
+    filters: TaskSearchSchema,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
+):
+    """
+    Advanced task search with multiple filters.
+    Returns tasks matching any provided filters (tenant-scoped).
+    """
+    organization_id = current_user.organization_id
+
+    # Base query - organization scoped
+    if current_user.role in [UserRole.ADMIN.value, UserRole.SUPER_ADMIN.value]:
+        query = select(Task).where(Task.organization_id == organization_id)
+    else:
+        # For members, only show tasks they're assigned to
+        query = (
+            select(Task)
+            .join(TaskMemberLink)
+            .where(
+                Task.organization_id == organization_id,
+                TaskMemberLink.user_id == current_user.id,
+            )
+        )
+
+    # Build dynamic filters
+    conditions = []
+
+    # Date range filters
+    if filters.from_date:
+        conditions.append(Task.created_at >= filters.from_date)
+    if filters.to_date:
+        # Include the entire day for to_date
+        to_date_end = filters.to_date.replace(hour=23, minute=59, second=59)
+        conditions.append(Task.created_at <= to_date_end)
+
+    # Text search filters
+    if filters.title:
+        conditions.append(Task.title.ilike(f"%{filters.title}%"))
+    if filters.status:
+        conditions.append(Task.status == filters.status)
+    if filters.priority:
+        conditions.append(Task.priority == filters.priority)
+
+    # Assigned user filter
+    if filters.assigned_to:
+        # Try to parse as user ID first, then search by name
+        try:
+            user_id = int(filters.assigned_to)
+            # Search by user ID
+            user_condition = Task.members.any(User.id == user_id)
+            conditions.append(user_condition)
+        except ValueError:
+            # Search by user name (case-insensitive)
+            user_condition = Task.members.any(
+                User.full_name.ilike(f"%{filters.assigned_to}%")
+            )
+            conditions.append(user_condition)
+
+    # Apply all conditions with AND logic
+    if conditions:
+        query = query.where(and_(*conditions))
+
+    # Order by creation date (newest first)
+    query = query.order_by(Task.created_at.desc())
+
+    try:
+        tasks = session.exec(query).all()
+    except SQLAlchemyError as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="A database error occurred while searching tasks."
+        )
+
+    if not tasks:
+        return []
+
+    # Prefetch related data for response
+    project_ids = {t.project_id for t in tasks}
+    projects = session.exec(select(Project).where(Project.id.in_(project_ids))).all()
+    project_map = {p.id: p.title for p in projects}
+
+    # Build response with member_ids
+    task_out_list = []
+    for task in tasks:
+        project_name = project_map.get(task.project_id)
+        
+        # Get assigned member IDs
+        member_links = session.exec(
+            select(TaskMemberLink.user_id).where(TaskMemberLink.task_id == task.id)
         ).all()
-        member_names = [member.full_name for member in members]
+        member_ids = [m[0] if isinstance(m, tuple) else m for m in member_links]
 
-    return TaskOut(
-        id=task.id,
-        title=task.title,
-        description=task.description,
-        status=task.status,
-        priority=task.priority,
-        due_date=task.due_date,
-        project_id=task.project_id,
-        organization_id=task.organization_id,
-        allow_member_edit=task.allow_member_edit,
-        created_at=task.created_at,
-        member_ids=member_ids,
-        project_name=project_name,
-        member_names=member_names
-    )
+        task_out = TaskOut.model_validate(
+            {
+                **task.dict(),
+                "member_ids": member_ids,
+                "project_name": project_name,
+            }
+        )
+        task_out_list.append(task_out)
+
+    return task_out_list

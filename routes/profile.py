@@ -64,6 +64,8 @@ def serialize_user(user: User) -> dict:
         "organization_id": user.organization_id,
         "created_at": user.created_at,
         "date_joined": user.date_joined,
+        "is_public_admin": user.is_public_admin,  # ✅ Include new field
+        "is_invited": user.is_invited,  # ✅ Include is_invited
     }
 
 

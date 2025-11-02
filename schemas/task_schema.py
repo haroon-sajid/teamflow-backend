@@ -1,133 +1,192 @@
-# schemas/task_schema.py
-from pydantic import BaseModel, Field, field_validator, model_validator, ConfigDict
+# task_schema.py
+from pydantic import BaseModel, Field, ConfigDict, validator
 from typing import Optional, List
 from datetime import datetime
 
-
-def _normalize_status(v: str) -> str:
-    mapping = {
-        "open": "Open",
-        "todo": "To Do",
-        "inprogress": "In Progress",
-        "in-progress": "In Progress",
-        "in progress": "In Progress",
-        "qa": "In QA",
-        "done": "Done"
-    }
-    normalized_key = v.strip().lower().replace(" ", "").replace("-", "")
-    return mapping.get(normalized_key, v)
-
-
-# -------------------------------------------------------
-# 🧱 Base Schema
-# -------------------------------------------------------
-class TaskBase(BaseModel):
-    title: str = Field(..., min_length=1, max_length=200)
+class TaskCreate(BaseModel):
+    title: str = Field(..., max_length=200)
     description: Optional[str] = Field(default=None, max_length=1000)
     status: str = Field(default="Open", max_length=20)
-    priority: Optional[str] = Field(default="medium", max_length=20)
+    priority: str = Field(default="medium", max_length=20)
     due_date: Optional[datetime] = None
     project_id: int
     allow_member_edit: bool = Field(default=False)
-    member_id: Optional[int] = None
-    member_ids: Optional[List[int]] = None
+    member_ids: Optional[List[int]] = Field(default=[])  # ✅ FIXED: Default empty list
 
-    @field_validator("status")
-    def normalize_status(cls, v):
-        return _normalize_status(v)
-
-
-# -------------------------------------------------------
-# 🆕 Create
-# -------------------------------------------------------
-class TaskCreate(TaskBase):
-    @model_validator(mode="after")
-    def validate_member_fields(self):
-        if self.member_id is None and (not self.member_ids or len(self.member_ids) == 0):
-            raise ValueError("Either member_id or member_ids must be provided")
-        return self
+    @validator('member_ids', pre=True)
+    def validate_member_ids(cls, v):
+        if v is None:
+            return []
+        return v
 
 
-# -------------------------------------------------------
-# ✏️ Update
-# -------------------------------------------------------
+class TaskRead(BaseModel):
+    id: int
+    title: str = Field(..., max_length=200)
+    description: Optional[str] = Field(default=None, max_length=1000)
+    status: str = Field(..., max_length=20)
+    priority: str = Field(..., max_length=20)
+    due_date: Optional[datetime] = None
+    project_id: int
+    project_name: Optional[str] = None     # ✅ Added field
+    created_at: datetime
+    allow_member_edit: bool = Field(default=False)
+    organization_id: Optional[int] = None
+    member_ids: List[int] = Field(default=[])  # ✅ Always a list
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class TaskUpdate(BaseModel):
-    title: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    title: Optional[str] = Field(default=None, max_length=200)
     description: Optional[str] = Field(default=None, max_length=1000)
     status: Optional[str] = Field(default=None, max_length=20)
     priority: Optional[str] = Field(default=None, max_length=20)
     due_date: Optional[datetime] = None
     project_id: Optional[int] = None
     allow_member_edit: Optional[bool] = None
-    member_id: Optional[int] = None
-    member_ids: Optional[List[int]] = None
+    member_ids: Optional[List[int]] = Field(default=[])  # ✅ FIXED: Default empty list
 
-    @field_validator("status")
-    def normalize_status(cls, v):
-        return _normalize_status(v) if v else v
-
-
-# -------------------------------------------------------
-# 🔐 Permission Update
-# -------------------------------------------------------
-class TaskPermissionUpdate(BaseModel):
-    allow_member_edit: bool
+    @validator('member_ids', pre=True)
+    def validate_member_ids(cls, v):
+        if v is None:
+            return []
+        return v
 
 
-# -------------------------------------------------------
-# 💬 Comments
-# -------------------------------------------------------
+class TaskUpdate(BaseModel):
+    title: Optional[str] = Field(default=None, max_length=200)
+    description: Optional[str] = Field(default=None, max_length=1000)
+    status: Optional[str] = Field(default=None, max_length=20)
+    priority: Optional[str] = Field(default=None, max_length=20)
+    due_date: Optional[datetime] = None
+    project_id: Optional[int] = None
+    allow_member_edit: Optional[bool] = None
+    member_ids: Optional[List[int]] = None  # ✅ ADD THIS LINE
+
+
+# Comments
 class CommentCreate(BaseModel):
-    message: str = Field(..., min_length=1, max_length=2000)
+    message: str = Field(..., max_length=2000)
 
 
-class CommentOut(BaseModel):
+class CommentRead(BaseModel):
     id: int
     task_id: int
     user_id: int
-    message: str
+    message: str = Field(..., max_length=2000)
     created_at: datetime
-    user_name: str
+
     model_config = ConfigDict(from_attributes=True)
 
 
-# -------------------------------------------------------
-# ⏱ Work Logs
-# -------------------------------------------------------
+# Worklogs
 class WorkLogCreate(BaseModel):
     hours: float = Field(..., gt=0)
     description: Optional[str] = Field(default=None, max_length=500)
     date: Optional[datetime] = None
+    
+    @validator('date', pre=True)
+    def parse_date(cls, value):
+        if isinstance(value, str):
+            # Handle both ISO format with and without timezone
+            if value.endswith('Z'):
+                return datetime.fromisoformat(value.replace('Z', '+00:00'))
+            else:
+                return datetime.fromisoformat(value)
+        return value
 
 
-class WorkLogOut(BaseModel):
+class WorkLogRead(BaseModel):
     id: int
     task_id: int
     user_id: int
     hours: float
-    date: datetime
     description: Optional[str]
+    date: datetime
     created_at: datetime
-    user_name: str
+
     model_config = ConfigDict(from_attributes=True)
 
 
-# -------------------------------------------------------
-# 📤 Output Schema
-# -------------------------------------------------------
-class TaskOut(BaseModel):
+# Task Member Link
+class TaskMemberLinkCreate(BaseModel):
+    task_id: int
+    user_id: int
+    organization_id: Optional[int] = None
+
+
+class TaskMemberLinkRead(BaseModel):
+    task_id: int
+    user_id: int
+    organization_id: Optional[int] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# Task Comment
+class TaskCommentCreate(BaseModel):
+    task_id: int
+    user_id: int
+    message: str = Field(..., max_length=2000)
+    organization_id: Optional[int] = None
+
+
+class TaskCommentRead(BaseModel):
     id: int
-    title: str
-    description: Optional[str] = None
-    status: str
-    priority: Optional[str] = "medium"
-    due_date: Optional[datetime] = None
-    project_id: int
-    organization_id: int
-    allow_member_edit: bool = False
+    task_id: int
+    user_id: int
+    message: str = Field(..., max_length=2000)
     created_at: datetime
-    member_ids: Optional[List[int]] = None
-    project_name: Optional[str] = None
-    member_names: Optional[List[str]] = None
+    organization_id: Optional[int] = None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class TaskCommentUpdate(BaseModel):
+    message: Optional[str] = Field(default=None, max_length=2000)
+
+
+# Task Work Log
+class TaskWorkLogCreate(BaseModel):
+    task_id: int
+    user_id: int
+    hours: float = Field(..., gt=0)
+    description: Optional[str] = Field(default=None, max_length=500)
+    date: Optional[datetime] = None
+    organization_id: Optional[int] = None
+
+
+class TaskWorkLogRead(BaseModel):
+    id: int
+    task_id: int
+    user_id: int
+    hours: float
+    description: Optional[str]
+    date: datetime
+    created_at: datetime
+    organization_id: Optional[int] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class TaskWorkLogUpdate(BaseModel):
+    hours: Optional[float] = Field(default=None, gt=0)
+    description: Optional[str] = Field(default=None, max_length=500)
+    date: Optional[datetime] = None
+
+
+
+
+
+# Add to schemas/task_schema.py
+
+class TaskSearchSchema(BaseModel):
+    from_date: Optional[datetime] = Field(default=None, alias="fromDate")
+    to_date: Optional[datetime] = Field(default=None, alias="toDate")
+    title: Optional[str] = Field(default=None, max_length=200)
+    status: Optional[str] = Field(default=None, max_length=20)
+    priority: Optional[str] = Field(default=None, max_length=20)
+    assigned_to: Optional[str] = Field(default=None, alias="assignedTo")
+
+    model_config = ConfigDict(populate_by_name=True)

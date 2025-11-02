@@ -1,11 +1,13 @@
+
 # routes/invitation.py
 import logging
 import os
 import uuid
 from datetime import datetime, timedelta
+from typing import Dict
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
-from sqlmodel import Session, select
+from sqlmodel import Session, select, func
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from core.database import get_session
@@ -15,9 +17,10 @@ from core.security import (
     get_current_admin,
     get_current_user,
 )
-from models.models import Invitation, Organization, User, UserRole
-from schemas.user_schema import AccountActivate, InvitationCreate
-from services.email_service import email_service
+from models.models import Invitation, Organization, User, UserRole, Payment, PaymentStatus, PlanName, MemberLimitUtils
+from schemas.user_schema import AccountActivate  
+from schemas.invitation_schema import InvitationCreate  
+from services.email_service import email_service  
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -26,8 +29,6 @@ router = APIRouter(tags=["Invitations"])
 
 # Default frontend url (production) but allow override via env
 DEFAULT_FRONTEND_URL = "https://teamflow-frontend.onrender.com"
-
-# DEFAULT_FRONTEND_URL = "http://localhost:5173"
 FRONTEND_URL = os.getenv("FRONTEND_URL", DEFAULT_FRONTEND_URL)
 
 INVITATION_VALID_DAYS = int(os.getenv("INVITATION_VALID_DAYS", "7"))  # used for DB expire field
@@ -53,9 +54,188 @@ def _get_org_name(session: Session, org_id: int) -> str:
         return "Your Organization"
 
 
+# -----------------------
+# Helper: Count active and pending members
+# -----------------------
+def _active_and_pending_member_count(org_id: int, session: Session) -> int:
+    """Count accepted active users + pending invitations."""
+    user_count = session.exec(
+        select(func.count(User.id)).where(
+            User.organization_id == org_id, User.is_active == True
+        )
+    ).one()
+
+    pending_count = session.exec(
+        select(func.count(Invitation.id)).where(
+            Invitation.organization_id == org_id,
+            Invitation.accepted == False,
+            Invitation.expires_at > datetime.utcnow(),
+        )
+    ).one()
+
+    return user_count + pending_count
+
+
+# -----------------------
+# Helper: Get current plan
+# -----------------------
+def _get_current_plan(org_id: int, session: Session) -> str:
+    """Return active plan name or Free by default."""
+    payment = session.exec(
+        select(Payment)
+        .where(
+            Payment.organization_id == org_id,
+            Payment.status == PaymentStatus.ACTIVE,
+            Payment.current_period_end > datetime.utcnow(),
+        )
+        .order_by(Payment.created_at.desc())
+    ).first()
+    return payment.plan_name if payment else PlanName.FREE.value
+
+
 # ==================================================================
 # Create / Send Invitation
 # ==================================================================
+
+# @router.post("/invitations", response_model=dict)
+# async def invite(
+#     invite: InvitationCreate,
+#     background_tasks: BackgroundTasks,
+#     current_user: User = Depends(get_current_admin),
+#     session: Session = Depends(get_session),
+# ):
+#     """
+#     Create and send an invitation for a user within the current admin's organization.
+#     Stores an Invitation record and sends the email asynchronously via BackgroundTasks.
+#     """
+#     # Validate organization context
+#     org_id = current_user.organization_id
+#     if not org_id:
+#         raise HTTPException(
+#             status_code=400,
+#             detail="Unable to send invitation. The current user is not associated with any organization.",
+#         )
+#     if not current_user.id:
+#         raise HTTPException(
+#             status_code=400,
+#             detail="Unable to identify the current user. Please log in again.",
+#         )
+
+#     # Prevent inviting SUPER_ADMIN role
+#     if invite.role == UserRole.SUPER_ADMIN.value:
+#         raise HTTPException(
+#             status_code=status.HTTP_400_BAD_REQUEST,
+#             detail="Cannot invite users as super_admin. Only admin or member roles are allowed.",
+#         )
+
+#     # Check member limits based on plan
+#     plan_name = _get_current_plan(org_id, session)
+#     current_total = _active_and_pending_member_count(org_id, session)
+
+#     if not MemberLimitUtils.can_organization_add_member(plan_name, current_total):
+#         raise HTTPException(
+#             status_code=status.HTTP_403_FORBIDDEN,
+#             detail=f"Member limit reached for plan '{plan_name}'. Remove a member or upgrade to invite more.",
+#         )
+
+#     # Check if user already exists in this organization
+#     existing = session.exec(
+#         select(User).where(User.email == invite.email, User.organization_id == org_id)
+#     ).first()
+#     if existing:
+#         raise HTTPException(
+#             status_code=400,
+#             detail="A user with this email already exists in your organization. Please log in instead.",
+#         )
+
+#     # Check for pending invitation in the same org
+#     pending = session.exec(
+#         select(Invitation).where(
+#             Invitation.email == invite.email,
+#             Invitation.organization_id == org_id,
+#             Invitation.accepted == False,
+#             Invitation.expires_at > datetime.utcnow(),
+#         )
+#     ).first()
+#     if pending:
+#         raise HTTPException(
+#             status_code=400,
+#             detail="An active invitation already exists for this email in your organization. Please resend the existing invitation.",
+#         )
+
+#     # Generate UUID token for invitation
+#     token = str(uuid.uuid4())
+#     expires_at = datetime.utcnow() + timedelta(days=INVITATION_VALID_DAYS)
+#     org_name = _get_org_name(session, org_id)
+#     invitation_link = _build_invitation_link(token)
+
+#     # Store invitation record for audit
+#     try:
+#         invitation = Invitation(
+#             email=invite.email,
+#             token=token,
+#             role=invite.role,
+#             expires_at=expires_at,
+#             sent_by_id=current_user.id,
+#             organization_id=org_id,  # tenant_id removed
+#             accepted=False,
+#             created_at=datetime.utcnow(),
+#         )
+#         session.add(invitation)
+#         session.commit()
+#         session.refresh(invitation)
+#     except IntegrityError as e:
+#         session.rollback()
+#         error_msg = str(e.orig)
+#         if "uq_org_invite_email" in error_msg:
+#             raise HTTPException(
+#                 status_code=status.HTTP_400_BAD_REQUEST,
+#                 detail="An invitation for this email already exists in this organization.",
+#             )
+#         else:
+#             raise HTTPException(
+#                 status_code=status.HTTP_400_BAD_REQUEST,
+#                 detail="A database constraint was violated while creating the invitation.",
+#             )
+#     except SQLAlchemyError as e:
+#         session.rollback()
+#         logger.exception("Database error while saving invitation for %s: %s", invite.email, e)
+#         raise HTTPException(status_code=500, detail="Database error while creating the invitation.")
+#     except Exception as exc:
+#         session.rollback()
+#         logger.exception("Unexpected error while storing invitation: %s", exc)
+#         raise HTTPException(status_code=500, detail="Unexpected error while creating invitation.")
+
+#     # Schedule email sending in background (non-blocking)
+#     try:
+#         background_tasks.add_task(
+#             email_service.send_invitation_email,
+#             invite.email,
+#             invitation_link,
+#             invite.role,
+#             org_name,
+#             current_user.full_name or current_user.email,
+#         )
+#         logger.info("Invitation email scheduled for %s", invite.email)
+#     except Exception as exc:
+#         logger.exception("Failed to schedule email task for %s: %s", invite.email, exc)
+#         # Do not rollback DB record — invitation already saved
+#         raise HTTPException(status_code=500, detail="Failed to schedule invitation email task.")
+
+#     return {
+#         "message": "Invitation created and email scheduled.",
+#         "email": invite.email,
+#         "role": invite.role,
+#         "expires_at": invitation.expires_at.isoformat(),
+#         "invitation_link": invitation_link,
+#         "invitation_id": invitation.id,
+#         "plan": plan_name,
+#     }
+
+
+# routes/invitation.py
+# Add this modification to the invite function
+
 @router.post("/invitations", response_model=dict)
 async def invite(
     invite: InvitationCreate,
@@ -64,33 +244,91 @@ async def invite(
     session: Session = Depends(get_session),
 ):
     """
-    Create an invitation for a user within the current admin's organization.
-    Uses UUID invitation token for the link and stores an Invitation record for audit.
+    Create and send an invitation for a user within the current admin's organization.
+    Stores an Invitation record and sends the email asynchronously via BackgroundTasks.
     """
+    # Validate organization context
     org_id = current_user.organization_id
     if not org_id:
-        raise HTTPException(status_code=400, detail="Unable to send invitation. The current user is not associated with any organization.")
+        raise HTTPException(
+            status_code=400,
+            detail="Unable to send invitation. The current user is not associated with any organization.",
+        )
     if not current_user.id:
-        raise HTTPException(status_code=400, detail="Unable to identify the current user. Please log in again.")
+        raise HTTPException(
+            status_code=400,
+            detail="Unable to identify the current user. Please log in again.",
+        )
 
-    # check if user already exists in the same org
+    # Prevent inviting SUPER_ADMIN role
+    if invite.role == UserRole.SUPER_ADMIN.value:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot invite users as super_admin. Only admin or member roles are allowed.",
+        )
+
+    # Check member limits based on plan
+    plan_name = _get_current_plan(org_id, session)
+    current_total = _active_and_pending_member_count(org_id, session)
+
+    if not MemberLimitUtils.can_organization_add_member(plan_name, current_total):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Member limit reached for plan '{plan_name}'. Remove a member or upgrade to invite more.",
+        )
+
+    # ✅ MODIFIED: Check if user already exists AND is active in this organization
     existing = session.exec(
-        select(User).where(User.email == invite.email, User.organization_id == org_id)
+        select(User).where(
+            User.email == invite.email, 
+            User.organization_id == org_id,
+            User.is_active == True  # Only check active users
+        )
     ).first()
     if existing:
-        raise HTTPException(status_code=400, detail="A user with this email already exists in your organization.")
+        raise HTTPException(
+            status_code=400,
+            detail="A user with this email already exists in your organization. Please log in instead.",
+        )
 
-    # check for pending invitation in the same org
-    pending = session.exec(
+    # ✅ MODIFIED: Check for pending invitation OR handle previously accepted invitations
+    existing_invitation = session.exec(
         select(Invitation).where(
             Invitation.email == invite.email,
             Invitation.organization_id == org_id,
-            Invitation.accepted == False,
-            Invitation.expires_at > datetime.utcnow(),
         )
     ).first()
-    if pending:
-        raise HTTPException(status_code=400, detail="An active invitation already exists for this email in your organization.")
+
+    if existing_invitation:
+        # If there's a pending invitation
+        if not existing_invitation.accepted and existing_invitation.expires_at > datetime.utcnow():
+            raise HTTPException(
+                status_code=400,
+                detail="An active invitation already exists for this email in your organization. Please resend the existing invitation.",
+            )
+        # ✅ NEW: If invitation was previously accepted but user was deleted, allow new invitation
+        elif existing_invitation.accepted:
+            # Check if the user actually exists and is active
+            user_exists = session.exec(
+                select(User).where(
+                    User.email == invite.email,
+                    User.organization_id == org_id,
+                    User.is_active == True
+                )
+            ).first()
+            
+            if not user_exists:
+                # User was deleted, so we can reuse this email for a new invitation
+                # Delete the old invitation record
+                session.delete(existing_invitation)
+                session.commit()
+                logger.info(f"Deleted old accepted invitation for {invite.email} as user no longer exists")
+            else:
+                # User exists and is active, so we can't send new invitation
+                raise HTTPException(
+                    status_code=400,
+                    detail="A user with this email already exists in your organization.",
+                )
 
     # Generate UUID token for invitation
     token = str(uuid.uuid4())
@@ -98,27 +336,8 @@ async def invite(
     org_name = _get_org_name(session, org_id)
     invitation_link = _build_invitation_link(token)
 
-    # attempt to send email (await)
+    # Store invitation record for audit
     try:
-        email_ok = await email_service.send_invitation_email(
-            to_email=invite.email,
-            invitation_link=invitation_link,
-            role=invite.role,
-            org_name=org_name,
-            invited_by=(current_user.full_name or current_user.email),
-        )
-    except Exception as exc:
-        logger.exception("Exception while calling email_service.send_invitation_email: %s", exc)
-        raise HTTPException(status_code=500, detail="Failed to send the invitation email. Please try again later.")
-
-    if not email_ok:
-        logger.error("Email service reported failure sending to %s", invite.email)
-        raise HTTPException(status_code=500, detail="Unable to send the invitation email. Please check the email address or try again later.")
-
-    # store invitation record for audit
-    try:
-        if not current_user.id:
-            raise HTTPException(status_code=400, detail="Unable to identify the current user.")
         invitation = Invitation(
             email=invite.email,
             token=token,
@@ -138,29 +357,46 @@ async def invite(
         if "uq_org_invite_email" in error_msg:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="An invitation for this email already exists in this organization."
+                detail="An invitation for this email already exists in this organization.",
             )
         else:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="A database constraint was violated while creating the invitation. Please try again."
+                detail="A database constraint was violated while creating the invitation.",
             )
     except SQLAlchemyError as e:
         session.rollback()
-        logger.exception("Failed to store invitation record for %s: %s", invite.email, e)
-        raise HTTPException(status_code=500, detail="A database error occurred while saving the invitation.")
+        logger.exception("Database error while saving invitation for %s: %s", invite.email, e)
+        raise HTTPException(status_code=500, detail="Database error while creating the invitation.")
     except Exception as exc:
         session.rollback()
-        logger.exception("Failed to store invitation record for %s: %s", invite.email, exc)
-        raise HTTPException(status_code=500, detail="An unexpected error occurred while creating the invitation.")
+        logger.exception("Unexpected error while storing invitation: %s", exc)
+        raise HTTPException(status_code=500, detail="Unexpected error while creating invitation.")
+
+    # Schedule email sending in background (non-blocking)
+    try:
+        background_tasks.add_task(
+            email_service.send_invitation_email,
+            invite.email,
+            invitation_link,
+            invite.role,
+            org_name,
+            current_user.full_name or current_user.email,
+        )
+        logger.info("Invitation email scheduled for %s", invite.email)
+    except Exception as exc:
+        logger.exception("Failed to schedule email task for %s: %s", invite.email, exc)
+        # Do not rollback DB record — invitation already saved
+        raise HTTPException(status_code=500, detail="Failed to schedule invitation email task.")
 
     return {
-        "message": "Invitation sent successfully.",
+        "message": "Invitation created and email scheduled.",
         "email": invite.email,
         "role": invite.role,
         "expires_at": invitation.expires_at.isoformat(),
         "invitation_link": invitation_link,
         "invitation_id": invitation.id,
+        "plan": plan_name,
     }
 
 
@@ -227,7 +463,9 @@ def accept_invite(data: AccountActivate, session: Session = Depends(get_session)
             organization_id=org_id,
             is_active=True,
             is_invited=True,
+            is_public_admin=False,  # ✅ Invited users are not public admins
             created_at=datetime.utcnow(),
+            date_joined=datetime.utcnow(),
         )
         session.add(user)
         session.commit()
@@ -286,6 +524,7 @@ def accept_invite(data: AccountActivate, session: Session = Depends(get_session)
             "role": user.role,
             "is_active": True,
             "is_invited": True,
+            "is_public_admin": user.is_public_admin,  # ✅ Include new field
             "organization_id": user.organization_id,
             "created_at": user.created_at.isoformat(),
         },
@@ -361,7 +600,9 @@ async def resend_invitation(
     org_name = _get_org_name(session, org_id)
 
     try:
-        email_ok = await email_service.send_invitation_email(
+        # email_ok = await email_service.send_invitation_email(
+        email_ok = email_service.send_invitation_email(
+
             to_email=email,
             invitation_link=invitation_link,
             role=invitation.role,
@@ -427,31 +668,97 @@ def get_organization_members(current_user: User = Depends(get_current_user), ses
             "role": u.role,
             "is_active": u.is_active,
             "is_invited": u.is_invited,
+            "is_public_admin": u.is_public_admin,  # ✅ Include new field
             "organization_id": u.organization_id,
             "created_at": u.created_at.isoformat(),
+            "date_joined": u.date_joined.isoformat() if u.date_joined else None,
         }
         for u in users
     ]
 
 
+
 # ==================================================================
-# Remove member from organization
+# Remove member from organization (Super Admin Only)
 # ==================================================================
+# routes/invitation.py - Modify the remove_member_from_organization function
+
 @router.delete("/members/{user_id}", status_code=200)
 def remove_member_from_organization(
-    user_id: int, current_user: User = Depends(get_current_user), session: Session = Depends(get_session)
+    user_id: int, 
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
 ):
-    if current_user.role not in [UserRole.ADMIN.value, UserRole.SUPER_ADMIN.value]:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You are not authorized to remove members from this organization.")
+    """Super Admin only: Remove member from organization with permanent deletion."""
+    
+    # Only Super Admin can remove members
+    if current_user.role != UserRole.SUPER_ADMIN.value:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, 
+            detail="Only Super Admin can remove members from the organization."
+        )
 
     user = session.get(User, user_id)
     if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
-    if current_user.role != UserRole.SUPER_ADMIN.value and user.organization_id != current_user.organization_id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You cannot remove members from another organization.")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, 
+            detail="User not found."
+        )
+    
+    # Ensure user is in the same organization
+    if user.organization_id != current_user.organization_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, 
+            detail="You cannot remove members from another organization."
+        )
 
-    user.organization_id = None
-    session.add(user)
-    session.commit()
-    session.refresh(user)
-    return {"success": True, "message": "Member removed from organization successfully."}
+    # Prevent self-removal
+    if user.id == current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You cannot remove yourself from the organization."
+        )
+
+    try:
+        # ✅ NEW: Transfer project ownership to current super admin
+        from models.models import Project  # Import if not already imported
+        
+        # Find all projects where this user is the creator
+        user_projects = session.exec(
+            select(Project).where(Project.creator_id == user_id)
+        ).all()
+        
+        # Transfer ownership to current super admin
+        for project in user_projects:
+            project.creator_id = current_user.id
+            session.add(project)
+            logger.info(f"Transferred project '{project.title}' ownership from user {user_id} to super admin {current_user.id}")
+
+        # ✅ Also delete any invitation records for this user
+        invitations = session.exec(
+            select(Invitation).where(
+                Invitation.email == user.email,
+                Invitation.organization_id == current_user.organization_id
+            )
+        ).all()
+        
+        for invitation in invitations:
+            session.delete(invitation)
+            logger.info(f"Deleted invitation record for deleted user: {user.email}")
+
+        # Permanent deletion
+        session.delete(user)
+        session.commit()
+        
+        return {
+            "success": True, 
+            "message": f"Member {user.email} has been permanently removed from the organization."
+        }
+        
+    except SQLAlchemyError as e:
+        session.rollback()
+        logger.error(f"Database error while removing member {user_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="A database error occurred while removing the member."
+        )

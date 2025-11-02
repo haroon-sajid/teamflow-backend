@@ -21,18 +21,25 @@ def create_project(
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user)
 ):
+    # Handle title/name mapping for backward compatibility
     project = Project(
-        name=data.name,
+        title=data.title,  # ✅ Map name to title
         description=data.description,
         creator_id=current_user.id or 0,
-        organization_id=current_user.organization_id,  #  Attach organization
+        organization_id=current_user.organization_id,
+        tenant_id=current_user.organization_id,  # ✅ Add tenant_id
         created_at=datetime.utcnow()
     )
     try:
         session.add(project)
         session.commit()
         session.refresh(project)
-        return project
+        
+        # Return with name field for frontend compatibility
+        response_data = ProjectRead.model_validate(project)
+        response_data.title = project.title  # ✅ Map title back to name for response
+        return response_data
+        
     except IntegrityError as e:
         session.rollback()
         raise HTTPException(
@@ -60,7 +67,15 @@ def get_projects(
         .where(Project.organization_id == current_user.organization_id)
         .order_by(desc(Project.created_at))
     ).all()
-    return projects
+    
+    # Map title to name for frontend compatibility
+    response_projects = []
+    for project in projects:
+        project_data = ProjectRead.model_validate(project)
+        project_data.title = project.title
+        response_projects.append(project_data)
+    
+    return response_projects
 
 # ==================================================================
 #  ✅ Get Single Project (with organization check)
@@ -79,7 +94,10 @@ def get_project(
     if project.organization_id != current_user.organization_id:
         raise HTTPException(status_code=403, detail="Not authorized to access this project")
     
-    return project
+    # Map title to name for frontend compatibility
+    project_data = ProjectRead.model_validate(project)
+    project_data.name = project.title  # ✅ Map title back to name
+    return project_data
 
 # ==================================================================
 #  ✅ Update Project (with organization check)
@@ -99,13 +117,20 @@ def update_project(
     if project.organization_id != current_user.organization_id:
         raise HTTPException(status_code=403, detail="Not authorized to update this project")
 
-    project.name = data.name
+    # Map name to title for update
+    project.title = data.title  # ✅ Map name to title
     project.description = data.description
+    
     try:
         session.add(project)
         session.commit()
         session.refresh(project)
-        return project
+        
+        # Map title back to name for response
+        project_data = ProjectRead.model_validate(project)
+        project_data.name = project.title  # ✅ Map title back to name
+        return project_data
+        
     except IntegrityError as e:
         session.rollback()
         raise HTTPException(

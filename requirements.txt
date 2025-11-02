@@ -477,3 +477,4 @@ yarg==0.1.9
 yarl==1.20.0
 zipp==3.18.0
 zstandard==0.23.0
+stripe

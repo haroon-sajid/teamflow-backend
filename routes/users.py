@@ -1,4 +1,3 @@
-
 # routes/users.py
 from fastapi import APIRouter, HTTPException, Depends, status
 from sqlmodel import Session, select
@@ -9,6 +8,10 @@ from models.models import User, UserRole
 from schemas.user_schema import UserCreate, UserRead, UserUpdate
 from core.database import get_session
 from core.security import get_current_user, get_current_admin
+
+import logging
+logger = logging.getLogger(__name__)
+
 
 router = APIRouter(tags=["Users"])
 
@@ -67,6 +70,22 @@ def update_current_user_profile(
                 detail="Not authorized to change active status."
             )
         current_user.is_active = user_update.is_active
+
+    # Handle profile fields
+    if user_update.department is not None:
+        current_user.department = user_update.department
+    if user_update.job_title is not None:
+        current_user.job_title = user_update.job_title
+    if user_update.phone_number is not None:
+        current_user.phone_number = user_update.phone_number
+    if user_update.time_zone is not None:
+        current_user.time_zone = user_update.time_zone
+    if user_update.bio is not None:
+        current_user.bio = user_update.bio
+    if user_update.skills is not None:
+        current_user.skills = user_update.skills
+    if user_update.profile_picture is not None:
+        current_user.profile_picture = user_update.profile_picture
 
     try:
         session.add(current_user)
@@ -175,6 +194,22 @@ def update_user(
     if user_update.is_active is not None:
         user.is_active = user_update.is_active
 
+    # Handle profile fields
+    if user_update.department is not None:
+        user.department = user_update.department
+    if user_update.job_title is not None:
+        user.job_title = user_update.job_title
+    if user_update.phone_number is not None:
+        user.phone_number = user_update.phone_number
+    if user_update.time_zone is not None:
+        user.time_zone = user_update.time_zone
+    if user_update.bio is not None:
+        user.bio = user_update.bio
+    if user_update.skills is not None:
+        user.skills = user_update.skills
+    if user_update.profile_picture is not None:
+        user.profile_picture = user_update.profile_picture
+
     try:
         session.add(user)
         session.commit()
@@ -201,40 +236,6 @@ def update_user(
         )
 
 
-# ----------------------------------------------------------------------
-# ✅ Delete User (Admin only)
-# ----------------------------------------------------------------------
-@router.delete("/{user_id}")
-def delete_user(
-    user_id: int,
-    current_user: User = Depends(get_current_admin),
-    session: Session = Depends(get_session)
-):
-    """Admin: delete a user within your organization."""
-    user = session.exec(
-        select(User)
-        .where(User.id == user_id, User.organization_id == current_user.organization_id)
-    ).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found.")
-
-    if user.id == current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="You cannot delete your own account."
-        )
-
-    try:
-        session.delete(user)
-        session.commit()
-        return {"message": "User deleted successfully."}
-    except SQLAlchemyError as e:
-        session.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="A database error occurred while deleting the user."
-        )
-
 
 # ----------------------------------------------------------------------
 # ✅ Get All Members of Organization
@@ -260,3 +261,65 @@ def get_organization_members(
     ).all()
     return members
 
+
+
+
+
+
+
+# ----------------------------------------------------------------------
+# ✅ DELETE USER (Super Admin Only - Permanent Deletion)
+# ----------------------------------------------------------------------
+@router.delete("/{user_id}/permanent", status_code=status.HTTP_200_OK)
+def delete_user_permanent(
+    user_id: int,
+    current_user: User = Depends(get_current_user),  # Changed from get_current_admin
+    session: Session = Depends(get_session)
+):
+    """Super Admin only: Permanently delete a user from the organization and database."""
+    
+    # Only Super Admin can perform permanent deletion
+    if current_user.role != UserRole.SUPER_ADMIN.value:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only Super Admin can permanently delete users."
+        )
+
+    # Prevent self-deletion
+    if user_id == current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You cannot delete your own account."
+        )
+
+    # Find user in the same organization
+    user = session.exec(
+        select(User).where(
+            User.id == user_id, 
+            User.organization_id == current_user.organization_id
+        )
+    ).first()
+    
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, 
+            detail="User not found in your organization."
+        )
+
+    try:
+        # Permanent deletion from database
+        session.delete(user)
+        session.commit()
+        
+        return {
+            "success": True, 
+            "message": f"User {user.email} has been permanently removed from the organization."
+        }
+        
+    except SQLAlchemyError as e:
+        session.rollback()
+        logger.error(f"Database error while deleting user {user_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="A database error occurred while deleting the user."
+        )
