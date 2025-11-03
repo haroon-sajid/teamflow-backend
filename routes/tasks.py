@@ -1,6 +1,6 @@
 # routes/tasks.py
 from fastapi import APIRouter, HTTPException, Depends, status
-from sqlmodel import Session, select
+from sqlmodel import Session, select, and_
 from typing import List, Optional
 from datetime import datetime
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -19,7 +19,8 @@ from schemas.task_schema import (
     CommentCreate,
     CommentRead as CommentOut,
     WorkLogCreate,
-    WorkLogRead as WorkLogOut
+    WorkLogRead as WorkLogOut,
+    TaskSearchSchema  # ✅ ADD THIS IMPORT
 )
 
 
@@ -722,15 +723,68 @@ def delete_task_work_log(
     session.commit()
 
 
+# ================================================================
+# ✅ UPDATE TASK STATUS (For Drag-and-Drop) - KEEP ONLY THIS ONE
+# ================================================================
+@router.patch("/{task_id}/status", response_model=TaskOut)
+def update_task_status(
+    task_id: int,
+    status: str,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
+):
+    """
+    Update task status (used for drag-and-drop functionality).
+    Members can only update status if allowed.
+    """
+    task = session.get(Task, task_id)
+    if not task:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Task not found"
+        )
+    
+    # Check access permissions
+    if not _check_task_access(session, task, current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to update this task"
+        )
+    
+    # For members, check if task allows member editing
+    is_admin_user = current_user.role in [UserRole.ADMIN.value, UserRole.SUPER_ADMIN.value]
+    if not is_admin_user and not task.allow_member_edit:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This task does not allow member editing"
+        )
+    
+    # Update task status
+    task.status = status
+    
+    try:
+        session.add(task)
+        session.commit()
+        session.refresh(task)
+    except IntegrityError as e:
+        session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A database constraint was violated while updating the task status."
+        )
+    except SQLAlchemyError as e:
+        session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="A database error occurred while updating the task status."
+        )
+    
+    return TaskOut.model_validate(task)
 
 
 # ================================================================
-# ✅ Search Tasks with Multiple Filters
+# ✅ Search Tasks with Multiple Filters - ADD THIS ENDPOINT
 # ================================================================
-
-from schemas.task_schema import TaskSearchSchema
-from sqlmodel import and_, or_
-
 @router.post("/search", response_model=List[TaskOut])
 def search_tasks(
     filters: TaskSearchSchema,
@@ -856,3 +910,12 @@ def search_tasks(
         task_out_list.append(task_out)
 
     return task_out_list
+
+
+# ================================================================
+# ✅ TEST SEARCH ENDPOINT
+# ================================================================
+@router.get("/search/test")
+def test_search_endpoint():
+    """Test if search endpoint is accessible"""
+    return {"message": "Search endpoint is working"}

@@ -1,4 +1,3 @@
-
 # task_schema.py
 from pydantic import BaseModel, Field, ConfigDict, validator
 from typing import Optional, List
@@ -33,8 +32,8 @@ class TaskRead(BaseModel):
     created_at: datetime
     allow_member_edit: bool = Field(default=False)
     organization_id: Optional[int] = None
-    member_ids: List[int] = Field(default=[])  # ✅ Existing field
-    member_names: List[str] = Field(default=[])  # ✅ NEW: Add member names
+    member_ids: List[int] = Field(default=[])  # ✅ Always a list
+    member_names: List[str] = Field(default=[])  # ✅ ADDED: For search results
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -181,7 +180,7 @@ class TaskOut(BaseModel):
     allow_member_edit: bool = Field(default=False)
     organization_id: Optional[int] = None
     member_ids: List[int] = Field(default=[])
-    member_names: List[str] = Field(default=[])  # ✅ NEW: Member names for display
+    member_names: List[str] = Field(default=[])  # ✅ ADDED: Member names for display
 
     model_config = ConfigDict(from_attributes=True)
 
