@@ -1,36 +1,50 @@
-# services/payment_service.py
-import os
+# ================================================================
+# services/payment_service.py — Stripe Checkout (Production Safe)
+# ================================================================
 import stripe
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
-from dotenv import load_dotenv
 
-load_dotenv()
+from core.config import settings  # ✅ Use centralized configuration
 
 router = APIRouter(prefix="/payments", tags=["Payments"])
 
-stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
-FRONTEND_URL = os.getenv("FRONTEND_URL")
+# ------------------------
+# STRIPE CONFIG
+# ------------------------
+stripe.api_key = settings.STRIPE_SECRET_KEY
 
 
 @router.post("/create-checkout-session")
 async def create_checkout_session(data: dict):
+    """
+    Create a Stripe Checkout Session for a subscription.
+    """
     price_id = data.get("price_id")
     if not price_id:
         raise HTTPException(status_code=400, detail="Price ID is required")
 
     try:
-        session = stripe.checkout.Session.create(
+        checkout_session = stripe.checkout.Session.create(
             payment_method_types=["card"],
             line_items=[{
                 "price": price_id,
-                "quantity": 1,
+                "quantity": 1
             }],
             mode="subscription",
-            success_url=f"{FRONTEND_URL}/payment/success?session_id={{CHECKOUT_SESSION_ID}}",
-            cancel_url=f"{FRONTEND_URL}/payment/cancel",
+            success_url=settings.STRIPE_SUCCESS_URL,
+            cancel_url=settings.STRIPE_CANCEL_URL,
         )
-        return {"checkout_url": session.url, "session_id": session.id}
+
+        return JSONResponse(
+            content={
+                "checkout_url": checkout_session.url,
+                "session_id": checkout_session.id,
+                "environment": settings.ENVIRONMENT,
+            },
+            status_code=200
+        )
+
     except stripe.error.InvalidRequestError as e:
         raise HTTPException(status_code=400, detail=f"Invalid price ID: {str(e)}")
     except Exception as e:

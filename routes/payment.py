@@ -1,7 +1,9 @@
 # routes/payment.py
 from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any
+from core.config import settings
 import asyncio
+import stripe
 
 from fastapi import APIRouter, Depends, HTTPException, status, Body, Request, BackgroundTasks
 from pydantic import BaseModel
@@ -653,15 +655,36 @@ def create_checkout_session(
             import time
             expires_at = int(time.time()) + 3600  # 1 hour from now in seconds
             
+
+            # checkout_session = stripe.checkout.Session.create(
+            #     payment_method_types=['card'],
+            #     line_items=[{
+            #         'price': price_id, 
+            #         'quantity': 1
+            #     }],
+            #     mode='subscription',
+            #     success_url=f"http://localhost:5173/payment/success?session_id={{CHECKOUT_SESSION_ID}}",
+            #     cancel_url="http://localhost:5173/payment/cancel",
+            #     client_reference_id=str(payment.id),
+            #     customer_email=current_user.email,
+
+            #     metadata={
+            #         'payment_id': str(payment.id),
+            #         'user_id': str(current_user.id),
+            #         'organization_id': str(current_user.organization_id),
+            #         'plan_name': pricing_plan.name,
+            #         'billing_cycle': billing_cycle.value
+            #     },
+
             checkout_session = stripe.checkout.Session.create(
                 payment_method_types=['card'],
                 line_items=[{
-                    'price': price_id, 
+                    'price': price_id,
                     'quantity': 1
                 }],
                 mode='subscription',
-                success_url=f"http://localhost:5173/payment/success?session_id={{CHECKOUT_SESSION_ID}}",
-                cancel_url="http://localhost:5173/payment/cancel",
+                success_url=settings.STRIPE_SUCCESS_URL,
+                cancel_url=settings.STRIPE_CANCEL_URL,
                 client_reference_id=str(payment.id),
                 customer_email=current_user.email,
                 metadata={
@@ -671,6 +694,7 @@ def create_checkout_session(
                     'plan_name': pricing_plan.name,
                     'billing_cycle': billing_cycle.value
                 },
+
                 locale='auto',
                 billing_address_collection='required',
                 allow_promotion_codes=True,
@@ -754,123 +778,7 @@ def create_checkout_session(
             detail="An unexpected error occurred while creating payment session. Please try again or contact support."
         )
     
-
-
-# @router.post("/subscribe-free")
-# def subscribe_free_plan(
-#     background_tasks: BackgroundTasks,
-#     current_user: User = Depends(require_public_super_admin),
-#     session: Session = Depends(get_session),
-# ):
-#     """Subscribe to free plan (no Stripe payment required)"""
-#     org_id = current_user.organization_id
-#     if org_id is None:
-#         raise HTTPException(
-#             status_code=400,
-#             detail="User does not belong to an organization"
-#         )
-
-#     # ✅ Check current subscription
-#     current_subscription = get_current_subscription_for_org(org_id, session)
-
-#     # ✅ Enforce member limits before switching to Free plan
-#     members_count = session.query(User).filter(User.organization_id == org_id).count()
-#     if members_count > 3:
-#         raise HTTPException(
-#             status_code=400,
-#             detail=f"Cannot downgrade: Free plan allows up to 3 members, but you currently have {members_count}. "
-#                    f"Please remove extra members first."
-#         )
-
-#     # ✅ If switching from paid to free, ensure limits are still enforced
-#     if current_subscription and current_subscription.plan_name != PlanName.FREE.value:
-#         try:
-#             enforce_plan_limits(org_id, session)
-#         except HTTPException as e:
-#             raise HTTPException(
-#                 status_code=403,
-#                 detail=f"Cannot switch to Free plan: {e.detail}. Please remove some members first or upgrade to a higher plan."
-#             )
-
-#     # ✅ Cancel any existing active subscription
-#     if current_subscription:
-#         current_subscription.status = PaymentStatus.CANCELLED
-#         current_subscription.updated_at = datetime.utcnow()
-#         session.add(current_subscription)
-
-#     # ✅ Find or create the Free plan in PricingPlan table
-#     free_plan = session.exec(
-#         select(PricingPlan).where(
-#             (PricingPlan.name == PlanName.FREE.value) |
-#             (PricingPlan.name == "Free")
-#         )
-#     ).first()
-
-#     if not free_plan:
-#         free_plan = PricingPlan(
-#             name="Free",
-#             slug="free",
-#             max_invitations=3,
-#             price_monthly=0.0,
-#             price_yearly=0.0,
-#             description="Perfect for small teams getting started",
-#             is_active=True,
-#             duration_days=30,
-#             stripe_price_id_monthly=STRIPE_FREE_PRICE_ID,
-#             stripe_price_id_yearly=STRIPE_FREE_PRICE_ID,
-#         )
-#         session.add(free_plan)
-#         session.commit()
-#         session.refresh(free_plan)
-
-#     # ✅ Create a new active Payment record for Free plan
-#     now = datetime.utcnow()
-#     payment = Payment(
-#         organization_id=org_id,
-#         user_id=current_user.id,
-#         plan_name=PlanName.FREE.value,
-#         pricing_plan_id=free_plan.id,
-#         billing_cycle=BillingCycle.MONTHLY.value,
-#         status=PaymentStatus.ACTIVE,
-#         current_period_start=now,
-#         current_period_end=now + timedelta(days=free_plan.duration_days),
-#         created_at=now,
-#         updated_at=now,
-#     )
-
-#     session.add(payment)
-#     session.commit()
-#     session.refresh(payment)
-
-#     # ✅ Link this payment record to organization
-#     org = session.get(Organization, org_id)
-#     if org:
-#         org.current_payment_id = payment.id
-#         session.add(org)
-#         session.commit()
-
-#     # ✅ Run background expiry check
-#     background_tasks.add_task(check_and_expire_subscriptions, session)
-
-#     # ✅ Return consistent API response
-#     return {
-#         "detail": "Free plan activated successfully",
-#         "subscription": ActiveSubscriptionOut(
-#             id=payment.id,
-#             organization_id=payment.organization_id,
-#             user_id=payment.user_id,
-#             plan_name=payment.plan_name,
-#             pricing_plan_id=payment.pricing_plan_id,
-#             stripe_subscription_id=payment.stripe_subscription_id,
-#             status=payment.status,
-#             start_date=payment.current_period_start,
-#             end_date=payment.current_period_end,
-#             created_at=payment.created_at,
-#             updated_at=payment.updated_at,
-#         )
-#     }
-
-
+    
 
 @router.post("/subscribe-free")
 def subscribe_free_plan(
