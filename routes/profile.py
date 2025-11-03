@@ -22,9 +22,10 @@ from schemas.profile_schema import ProfileRead, ProfileUpdate
 
 router = APIRouter(prefix="/profile", tags=["Profile"])
 
-# -------------------------------------------------
-# Configuration
-# -------------------------------------------------
+
+# ==================================================================
+#  ✅  Configuration
+# ================================================================== 
 UPLOAD_DIR = Path("./uploads/profile_pictures/")
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png"}
@@ -64,23 +65,24 @@ def serialize_user(user: User) -> dict:
         "organization_id": user.organization_id,
         "created_at": user.created_at,
         "date_joined": user.date_joined,
-        "is_public_admin": user.is_public_admin,  # ✅ Include new field
-        "is_invited": user.is_invited,  # ✅ Include is_invited
+        "is_public_admin": user.is_public_admin,  # Include new field
+        "is_invited": user.is_invited,  # Include is_invited
     }
 
 
-# -------------------------------------------------
-# ✅ Get Current User Profile
-# -------------------------------------------------
+# ==================================================================
+#  ✅  Get Current User Profile
+# ================================================================== 
+
 @router.get("/me", response_model=ProfileRead)
 async def get_my_profile(current_user: User = Depends(get_current_user)):
     """Return the current user's profile details."""
     return serialize_user(current_user)
 
 
-# -------------------------------------------------
-# ✅ Update Current User Profile (With Picture Upload)
-# -------------------------------------------------
+# ==================================================================
+#  ✅ Update Current User Profile (With Picture Upload)
+# ================================================================== 
 @router.put("/me", response_model=ProfileRead)
 async def update_my_profile(
     full_name: Optional[str] = Form(None),
@@ -164,10 +166,9 @@ async def update_my_profile(
             detail="An unexpected error occurred while updating your profile.",
         )
 
-
-# -------------------------------------------------
-# ✅ Get All Organization Members' Profiles
-# -------------------------------------------------
+# ==================================================================
+#  ✅ Get All Organization Members' Profiles
+# ================================================================== 
 @router.get("/organization/members", response_model=List[ProfileRead])
 async def get_org_profiles(
     session: Session = Depends(get_session),

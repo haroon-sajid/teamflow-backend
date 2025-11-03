@@ -179,8 +179,7 @@ class TaskWorkLogUpdate(BaseModel):
 
 
 
-# Add to schemas/task_schema.py
-
+# Add this search schemas
 class TaskSearchSchema(BaseModel):
     from_date: Optional[datetime] = Field(default=None, alias="fromDate")
     to_date: Optional[datetime] = Field(default=None, alias="toDate")

@@ -30,21 +30,21 @@ router = APIRouter(tags=["Invitations"])
 # Default frontend url (production) but allow override via env
 DEFAULT_FRONTEND_URL = "https://teamflow-frontend.onrender.com"
 FRONTEND_URL = os.getenv("FRONTEND_URL", DEFAULT_FRONTEND_URL)
+# used for DB expire field
+INVITATION_VALID_DAYS = int(os.getenv("INVITATION_VALID_DAYS", "7"))  
 
-INVITATION_VALID_DAYS = int(os.getenv("INVITATION_VALID_DAYS", "7"))  # used for DB expire field
 
-
-# -----------------------
+# ==================================================================
 # Helper: build invite link
-# -----------------------
+# ==================================================================
 def _build_invitation_link(token: str) -> str:
     """Build invitation link with UUID token"""
     return f"{FRONTEND_URL.rstrip('/')}/accept-invitation?token={token}"
 
 
-# -----------------------
+# ==================================================================
 # Helper: get org name
-# -----------------------
+# ==================================================================
 def _get_org_name(session: Session, org_id: int) -> str:
     try:
         org = session.exec(select(Organization).where(Organization.id == org_id)).first()
@@ -54,9 +54,9 @@ def _get_org_name(session: Session, org_id: int) -> str:
         return "Your Organization"
 
 
-# -----------------------
+# ==================================================================
 # Helper: Count active and pending members
-# -----------------------
+# ==================================================================
 def _active_and_pending_member_count(org_id: int, session: Session) -> int:
     """Count accepted active users + pending invitations."""
     user_count = session.exec(
@@ -76,9 +76,9 @@ def _active_and_pending_member_count(org_id: int, session: Session) -> int:
     return user_count + pending_count
 
 
-# -----------------------
+# ==================================================================
 # Helper: Get current plan
-# -----------------------
+# ==================================================================
 def _get_current_plan(org_id: int, session: Session) -> str:
     """Return active plan name or Free by default."""
     payment = session.exec(
@@ -96,146 +96,6 @@ def _get_current_plan(org_id: int, session: Session) -> str:
 # ==================================================================
 # Create / Send Invitation
 # ==================================================================
-
-# @router.post("/invitations", response_model=dict)
-# async def invite(
-#     invite: InvitationCreate,
-#     background_tasks: BackgroundTasks,
-#     current_user: User = Depends(get_current_admin),
-#     session: Session = Depends(get_session),
-# ):
-#     """
-#     Create and send an invitation for a user within the current admin's organization.
-#     Stores an Invitation record and sends the email asynchronously via BackgroundTasks.
-#     """
-#     # Validate organization context
-#     org_id = current_user.organization_id
-#     if not org_id:
-#         raise HTTPException(
-#             status_code=400,
-#             detail="Unable to send invitation. The current user is not associated with any organization.",
-#         )
-#     if not current_user.id:
-#         raise HTTPException(
-#             status_code=400,
-#             detail="Unable to identify the current user. Please log in again.",
-#         )
-
-#     # Prevent inviting SUPER_ADMIN role
-#     if invite.role == UserRole.SUPER_ADMIN.value:
-#         raise HTTPException(
-#             status_code=status.HTTP_400_BAD_REQUEST,
-#             detail="Cannot invite users as super_admin. Only admin or member roles are allowed.",
-#         )
-
-#     # Check member limits based on plan
-#     plan_name = _get_current_plan(org_id, session)
-#     current_total = _active_and_pending_member_count(org_id, session)
-
-#     if not MemberLimitUtils.can_organization_add_member(plan_name, current_total):
-#         raise HTTPException(
-#             status_code=status.HTTP_403_FORBIDDEN,
-#             detail=f"Member limit reached for plan '{plan_name}'. Remove a member or upgrade to invite more.",
-#         )
-
-#     # Check if user already exists in this organization
-#     existing = session.exec(
-#         select(User).where(User.email == invite.email, User.organization_id == org_id)
-#     ).first()
-#     if existing:
-#         raise HTTPException(
-#             status_code=400,
-#             detail="A user with this email already exists in your organization. Please log in instead.",
-#         )
-
-#     # Check for pending invitation in the same org
-#     pending = session.exec(
-#         select(Invitation).where(
-#             Invitation.email == invite.email,
-#             Invitation.organization_id == org_id,
-#             Invitation.accepted == False,
-#             Invitation.expires_at > datetime.utcnow(),
-#         )
-#     ).first()
-#     if pending:
-#         raise HTTPException(
-#             status_code=400,
-#             detail="An active invitation already exists for this email in your organization. Please resend the existing invitation.",
-#         )
-
-#     # Generate UUID token for invitation
-#     token = str(uuid.uuid4())
-#     expires_at = datetime.utcnow() + timedelta(days=INVITATION_VALID_DAYS)
-#     org_name = _get_org_name(session, org_id)
-#     invitation_link = _build_invitation_link(token)
-
-#     # Store invitation record for audit
-#     try:
-#         invitation = Invitation(
-#             email=invite.email,
-#             token=token,
-#             role=invite.role,
-#             expires_at=expires_at,
-#             sent_by_id=current_user.id,
-#             organization_id=org_id,  # tenant_id removed
-#             accepted=False,
-#             created_at=datetime.utcnow(),
-#         )
-#         session.add(invitation)
-#         session.commit()
-#         session.refresh(invitation)
-#     except IntegrityError as e:
-#         session.rollback()
-#         error_msg = str(e.orig)
-#         if "uq_org_invite_email" in error_msg:
-#             raise HTTPException(
-#                 status_code=status.HTTP_400_BAD_REQUEST,
-#                 detail="An invitation for this email already exists in this organization.",
-#             )
-#         else:
-#             raise HTTPException(
-#                 status_code=status.HTTP_400_BAD_REQUEST,
-#                 detail="A database constraint was violated while creating the invitation.",
-#             )
-#     except SQLAlchemyError as e:
-#         session.rollback()
-#         logger.exception("Database error while saving invitation for %s: %s", invite.email, e)
-#         raise HTTPException(status_code=500, detail="Database error while creating the invitation.")
-#     except Exception as exc:
-#         session.rollback()
-#         logger.exception("Unexpected error while storing invitation: %s", exc)
-#         raise HTTPException(status_code=500, detail="Unexpected error while creating invitation.")
-
-#     # Schedule email sending in background (non-blocking)
-#     try:
-#         background_tasks.add_task(
-#             email_service.send_invitation_email,
-#             invite.email,
-#             invitation_link,
-#             invite.role,
-#             org_name,
-#             current_user.full_name or current_user.email,
-#         )
-#         logger.info("Invitation email scheduled for %s", invite.email)
-#     except Exception as exc:
-#         logger.exception("Failed to schedule email task for %s: %s", invite.email, exc)
-#         # Do not rollback DB record — invitation already saved
-#         raise HTTPException(status_code=500, detail="Failed to schedule invitation email task.")
-
-#     return {
-#         "message": "Invitation created and email scheduled.",
-#         "email": invite.email,
-#         "role": invite.role,
-#         "expires_at": invitation.expires_at.isoformat(),
-#         "invitation_link": invitation_link,
-#         "invitation_id": invitation.id,
-#         "plan": plan_name,
-#     }
-
-
-# routes/invitation.py
-# Add this modification to the invite function
-
 @router.post("/invitations", response_model=dict)
 async def invite(
     invite: InvitationCreate,

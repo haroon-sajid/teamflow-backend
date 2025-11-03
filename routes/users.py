@@ -16,18 +16,18 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Users"])
 
 
-# ----------------------------------------------------------------------
+# ================================================================
 # ✅ Get Current User
-# ----------------------------------------------------------------------
+# ================================================================
 @router.get("/me", response_model=UserRead)
 def get_current_user_endpoint(current_user: User = Depends(get_current_user)):
     """Return current user info (decoded from JWT)."""
     return current_user
 
 
-# ----------------------------------------------------------------------
+# ================================================================
 # ✅ Update Current User Profile (Self)
-# ----------------------------------------------------------------------
+# ================================================================
 @router.put("/me", response_model=UserRead)
 def update_current_user_profile(
     user_update: UserUpdate,
@@ -113,9 +113,9 @@ def update_current_user_profile(
         )
 
 
-# ----------------------------------------------------------------------
+# ================================================================
 # ✅ Get All Users (Organization-Scoped, Admin only)
-# ----------------------------------------------------------------------
+# ================================================================
 @router.get("/", response_model=List[UserRead])
 def get_all_users(
     current_user: User = Depends(get_current_admin),
@@ -128,9 +128,9 @@ def get_all_users(
     return users
 
 
-# ----------------------------------------------------------------------
+# ================================================================
 # ✅ Get User by ID (Org-Scoped)
-# ----------------------------------------------------------------------
+# ================================================================
 @router.get("/{user_id}", response_model=UserRead)
 def get_user(
     user_id: int,
@@ -154,9 +154,9 @@ def get_user(
     return user
 
 
-# ----------------------------------------------------------------------
+# ================================================================
 # ✅ Update Another User (Admin only)
-# ----------------------------------------------------------------------
+# ================================================================
 @router.put("/{user_id}", response_model=UserRead)
 def update_user(
     user_id: int,
@@ -237,9 +237,9 @@ def update_user(
 
 
 
-# ----------------------------------------------------------------------
+# ================================================================
 # ✅ Get All Members of Organization
-# ----------------------------------------------------------------------
+# ================================================================
 @router.get("/organization/members", response_model=List[UserRead])
 def get_organization_members(
     current_user: User = Depends(get_current_user),
@@ -267,9 +267,10 @@ def get_organization_members(
 
 
 
-# ----------------------------------------------------------------------
+# ================================================================
 # ✅ DELETE USER (Super Admin Only - Permanent Deletion)
-# ----------------------------------------------------------------------
+# ================================================================
+
 @router.delete("/{user_id}/permanent", status_code=status.HTTP_200_OK)
 def delete_user_permanent(
     user_id: int,

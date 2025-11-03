@@ -26,9 +26,9 @@ from schemas.task_schema import (
 router = APIRouter(tags=["Tasks"])
 
 
-# ============================================================================
+# ================================================================
 #  ✅ Helper function to check if user is assigned to task
-# ============================================================================
+# ================================================================
 def _is_user_assigned_to_task(session: Session, user_id: int, task_id: int) -> bool:
     assignment = session.exec(
         select(TaskMemberLink).where(
@@ -39,9 +39,9 @@ def _is_user_assigned_to_task(session: Session, user_id: int, task_id: int) -> b
     return assignment is not None
 
 
-# ============================================================================
+# ================================================================
 #  ✅ Helper function to check task access
-# ============================================================================
+# ================================================================
 def _check_task_access(session: Session, task: Task, current_user: User) -> bool:
     """Check if user has access to the task"""
     if task.organization_id != current_user.organization_id:
@@ -57,9 +57,9 @@ def _check_task_access(session: Session, task: Task, current_user: User) -> bool
     return False
 
 
-# ============================================================================
+# ================================================================
 #  ✅ Create New Task with Organization
-# ============================================================================
+# ================================================================
 
 @router.post("/", response_model=TaskOut, status_code=201)
 def create_task(
@@ -152,9 +152,9 @@ def create_task(
         )
 
 
-# ============================================================================
+# ================================================================
 #  ✅ Get All Tasks (Organization-scoped)
-# ============================================================================
+# ================================================================
 
 @router.get("/", response_model=List[TaskOut])
 def get_tasks(
@@ -222,9 +222,9 @@ def get_tasks(
     return task_out_list
 
 
-# ============================================================================
+# ================================================================
 #  ✅ Get Single Task
-# ============================================================================
+# ================================================================
 @router.get("/{task_id}", response_model=TaskOut)
 def get_task(
     task_id: int,
@@ -253,9 +253,9 @@ def get_task(
     return TaskOut.model_validate(task)
 
 
-# ============================================================================
+# ================================================================
 #   ✅ Update Task
-# ============================================================================
+# ================================================================
 
 # In tasks.py - FIXED update_task function
 @router.put("/{task_id}", response_model=TaskOut)
@@ -356,9 +356,10 @@ def update_task(
     
     return TaskOut.model_validate(task)
 
-# ============================================================================
+
+# ================================================================
 #   ✅ Delete Task
-# ============================================================================
+# ================================================================
 @router.delete("/{task_id}", status_code=204)
 def delete_task(
     task_id: int,
@@ -424,9 +425,9 @@ def delete_task(
         )
 
 
-# ============================================================================
+# ================================================================
 #  ✅ Assign Members to Task
-# ============================================================================
+# ================================================================
 @router.post("/{task_id}/assign", response_model=TaskOut)
 def assign_members_to_task(
     task_id: int,
@@ -483,9 +484,9 @@ def assign_members_to_task(
     return TaskOut.model_validate(task)
 
 
-# ============================================================================
+# ================================================================
 #  ✅ GET TASK COMMENTS
-# ============================================================================
+# ================================================================
 @router.get("/{task_id}/comments", response_model=List[CommentOut])
 def get_task_comments(
     task_id: int,
@@ -519,9 +520,9 @@ def get_task_comments(
     return [CommentOut.model_validate(comment) for comment in comments]
 
 
-# ============================================================================
+# ================================================================
 #  ✅ CREATE TASK COMMENTS
-# ============================================================================
+# ================================================================
 @router.post("/{task_id}/comments", response_model=CommentOut, status_code=201)
 def create_task_comment(
     task_id: int,
@@ -561,9 +562,9 @@ def create_task_comment(
     return CommentOut.model_validate(comment)
 
 
-# ============================================================================
+# ================================================================
 # ✅ GET TASK WORK LOGS
-# ============================================================================
+# ================================================================
 @router.get("/{task_id}/worklogs", response_model=List[WorkLogOut])
 def get_task_work_logs(
     task_id: int,
@@ -597,9 +598,9 @@ def get_task_work_logs(
     return [WorkLogOut.model_validate(work_log) for work_log in work_logs]
 
 
-# ============================================================================
+# ================================================================
 # ✅ CREATE TASK WORK LOGS
-# ============================================================================
+# ================================================================
 @router.post("/{task_id}/worklogs", response_model=WorkLogOut, status_code=201)
 def create_task_work_log(
     task_id: int,
@@ -641,9 +642,9 @@ def create_task_work_log(
     return WorkLogOut.model_validate(work_log)
 
 
-# ============================================================================
+# ================================================================
 # ✅ DELETE TASK COMMENT
-# ============================================================================
+# ================================================================
 @router.delete("/comments/{comment_id}", status_code=204)
 def delete_task_comment(
     comment_id: int,
@@ -681,9 +682,9 @@ def delete_task_comment(
     session.commit()
 
 
-# ============================================================================
+# ================================================================
 # ✅ DELETE TASK WORK LOG
-# ============================================================================
+# ================================================================
 @router.delete("/worklogs/{worklog_id}", status_code=204)
 def delete_task_work_log(
     worklog_id: int,
@@ -721,9 +722,9 @@ def delete_task_work_log(
     session.commit()
 
 
-# ============================================================================
+# ================================================================
 #  ✅ Update Task Status Only (for drag/drop and member updates)
-# ============================================================================
+# ================================================================
 @router.patch("/{task_id}/status", response_model=TaskOut)
 def update_task_status(
     task_id: int,
@@ -766,22 +767,10 @@ def update_task_status(
     return TaskOut.model_validate(task)
 
 
+# ================================================================
+#  ✅ Search Tasks with Multiple Filters
+# ================================================================
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# Add to routes/tasks.py after the existing imports
 from schemas.task_schema import TaskSearchSchema
 from sqlmodel import and_, or_
 
