@@ -1,6 +1,6 @@
 # task_schema.py
 from pydantic import BaseModel, Field, ConfigDict, validator
-from typing import Optional, List
+from typing import Annotated, Optional, List
 from datetime import datetime
 
 class TaskCreate(BaseModel):
@@ -195,3 +195,4 @@ class TaskSearchSchema(BaseModel):
     assigned_to: Optional[str] = Field(default=None, alias="assignedTo")
 
     model_config = ConfigDict(populate_by_name=True)
+

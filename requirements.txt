@@ -34,14 +34,6 @@ flask-cors
 # Task scheduling / background
 watchfiles
 
-# AI & LLM tools (keep only relevant high-level ones)
-openai
-anthropic
-groq
-langchain
-langgraph
-chromadb
-sentence-transformers
 
 # Data processing / analytics
 numpy
