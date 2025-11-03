@@ -22,6 +22,10 @@ __pycache__/
 *.pyd
 *.pdb
 *.so
+*.c
+*.cpp
+*.h
+*.o
 
 # Logs and debug files
 *.log
@@ -51,6 +55,14 @@ dist/
 *.egg-info/
 .eggs/
 
+# Local packaging or compilation artifacts
+pip-wheel-metadata/
+pip-wheel-cache/
+*.whl
+*.egg
+*.manifest
+MANIFEST
+
 # Temporary or local data
 tmp/
 temp/
@@ -59,6 +71,19 @@ uploads/
 instance/
 backup/
 
+# Cython or Pandas build cache (prevents recompile errors)
+pandas/
+pandas/_libs/
+__pypackages__/
+cython_debug/
+*.pyd
+*.pyo
+*.so
+*.c
+*.cpp
+*.pyx
+*.pxd
+
 # Docker and deployment
 docker-compose.override.yml
 .dockerignore
@@ -66,7 +91,7 @@ docker-compose.override.yml
 
 # --------------------------------
 # KEEP these (Production-relevant)
-# -------------------------------
+# --------------------------------
 !main.py
 !requirements.txt
 !README.md
