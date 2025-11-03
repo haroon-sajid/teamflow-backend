@@ -722,59 +722,15 @@ def delete_task_work_log(
     session.commit()
 
 
-# ================================================================
-#  ✅ Update Task Status Only (for drag/drop and member updates)
-# ================================================================
-@router.patch("/{task_id}/status", response_model=TaskOut)
-def update_task_status(
-    task_id: int,
-    status: str,
-    current_user: User = Depends(get_current_user),
-    session: Session = Depends(get_session)
-):
-    """
-    Update only the status of a task.
-    Members can use this endpoint to update task status even if allow_member_edit is False.
-    """
-    task = session.get(Task, task_id)
-    if not task:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Task not found"
-        )
-
-    # Check access permissions
-    if not _check_task_access(session, task, current_user):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to update this task"
-        )
-
-    # Update only the status
-    task.status = status
-
-    try:
-        session.add(task)
-        session.commit()
-        session.refresh(task)
-    except SQLAlchemyError as e:
-        session.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="A database error occurred while updating the task status."
-        )
-
-    return TaskOut.model_validate(task)
 
 
 # ================================================================
-#  ✅ Search Tasks with Multiple Filters
+# ✅ Search Tasks with Multiple Filters
 # ================================================================
 
 from schemas.task_schema import TaskSearchSchema
 from sqlmodel import and_, or_
 
-# Add this endpoint after the existing task routes
 @router.post("/search", response_model=List[TaskOut])
 def search_tasks(
     filters: TaskSearchSchema,
@@ -858,21 +814,42 @@ def search_tasks(
     projects = session.exec(select(Project).where(Project.id.in_(project_ids))).all()
     project_map = {p.id: p.title for p in projects}
 
-    # Build response with member_ids
+    # Get all member IDs across all tasks
+    all_member_ids = set()
+    for task in tasks:
+        member_links = session.exec(
+            select(TaskMemberLink.user_id).where(TaskMemberLink.task_id == task.id)
+        ).all()
+        for member_id in member_links:
+            all_member_ids.add(member_id[0] if isinstance(member_id, tuple) else member_id)
+
+    # Fetch all member details in one query
+    members = session.exec(select(User).where(User.id.in_(all_member_ids))).all()
+    member_map = {member.id: member.full_name for member in members}
+
+    # Build response with member_ids and member_names
     task_out_list = []
     for task in tasks:
         project_name = project_map.get(task.project_id)
         
-        # Get assigned member IDs
+        # Get assigned member IDs and names
         member_links = session.exec(
             select(TaskMemberLink.user_id).where(TaskMemberLink.task_id == task.id)
         ).all()
-        member_ids = [m[0] if isinstance(m, tuple) else m for m in member_links]
+        
+        member_ids = []
+        member_names = []
+        for member_link in member_links:
+            member_id = member_link[0] if isinstance(member_link, tuple) else member_link
+            member_ids.append(member_id)
+            member_name = member_map.get(member_id, "Unknown")
+            member_names.append(member_name)
 
         task_out = TaskOut.model_validate(
             {
                 **task.dict(),
                 "member_ids": member_ids,
+                "member_names": member_names,  # Add member names
                 "project_name": project_name,
             }
         )

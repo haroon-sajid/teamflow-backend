@@ -1,3 +1,4 @@
+
 # task_schema.py
 from pydantic import BaseModel, Field, ConfigDict, validator
 from typing import Optional, List
@@ -32,7 +33,8 @@ class TaskRead(BaseModel):
     created_at: datetime
     allow_member_edit: bool = Field(default=False)
     organization_id: Optional[int] = None
-    member_ids: List[int] = Field(default=[])  # ✅ Always a list
+    member_ids: List[int] = Field(default=[])  # ✅ Existing field
+    member_names: List[str] = Field(default=[])  # ✅ NEW: Add member names
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -52,17 +54,6 @@ class TaskUpdate(BaseModel):
         if v is None:
             return []
         return v
-
-
-class TaskUpdate(BaseModel):
-    title: Optional[str] = Field(default=None, max_length=200)
-    description: Optional[str] = Field(default=None, max_length=1000)
-    status: Optional[str] = Field(default=None, max_length=20)
-    priority: Optional[str] = Field(default=None, max_length=20)
-    due_date: Optional[datetime] = None
-    project_id: Optional[int] = None
-    allow_member_edit: Optional[bool] = None
-    member_ids: Optional[List[int]] = None  # ✅ ADD THIS LINE
 
 
 # Comments
@@ -176,7 +167,23 @@ class TaskWorkLogUpdate(BaseModel):
     date: Optional[datetime] = None
 
 
+# Add this schema specifically for search results
+class TaskOut(BaseModel):
+    id: int
+    title: str = Field(..., max_length=200)
+    description: Optional[str] = Field(default=None, max_length=1000)
+    status: str = Field(..., max_length=20)
+    priority: str = Field(..., max_length=20)
+    due_date: Optional[datetime] = None
+    project_id: int
+    project_name: Optional[str] = None
+    created_at: datetime
+    allow_member_edit: bool = Field(default=False)
+    organization_id: Optional[int] = None
+    member_ids: List[int] = Field(default=[])
+    member_names: List[str] = Field(default=[])  # ✅ NEW: Member names for display
 
+    model_config = ConfigDict(from_attributes=True)
 
 
 # Add this search schemas
