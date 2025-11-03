@@ -80,8 +80,6 @@ def get_organization(
 
 
 
-
-
 # In your organization creation/signup logic
 from datetime import datetime, timedelta
 from models.models import Payment, PricingPlan, PlanName, PaymentStatus, BillingCycle
@@ -112,7 +110,7 @@ def create_organization_with_free_plan(org_name: str, user: User, session: Sessi
         free_plan = PricingPlan(
             name=PlanName.FREE.value,
             slug="free",
-            max_invitations=3,
+            max_invitations=4,
             price_monthly=0.0,
             price_yearly=0.0,
             description="Perfect for small teams getting started",

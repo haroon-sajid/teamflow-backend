@@ -326,7 +326,7 @@ def create_default_pricing_plans(session: Session):
         {
             "name": "Free",
             "slug": "free",
-            "max_invitations": 3,
+            "max_invitations": 4,
             "price_monthly": 0.0,
             "price_yearly": 0.0,
             "description": "Perfect for small teams getting started",
@@ -338,7 +338,7 @@ def create_default_pricing_plans(session: Session):
         {
             "name": "Pro", 
             "slug": "pro",
-            "max_invitations": 10,
+            "max_invitations": 11,
             "price_monthly": 29.0,
             "price_yearly": 29.0,  # Same as monthly since no yearly plan
             "description": "For growing teams with advanced needs",
@@ -833,7 +833,7 @@ def subscribe_free_plan(
         free_plan = PricingPlan(
             name="Free",
             slug="free",
-            max_invitations=3,
+            max_invitations=4,
             price_monthly=0.0,
             price_yearly=0.0,
             description="Perfect for small teams getting started",

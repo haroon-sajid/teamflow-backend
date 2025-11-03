@@ -261,7 +261,7 @@ class PricingPlan(SQLModel, table=True):
 
     # Pricing & Billing
     member_limit: Optional[int] = Field(default=3)
-    max_invitations: Optional[int] = Field(default=3, description="Maximum invitations allowed for this plan")
+    max_invitations: Optional[int] = Field(default=4, description="Maximum invitations allowed for this plan")
     price_monthly: Optional[float] = Field(default=0.0)
     price_yearly: Optional[float] = Field(default=0.0)
     currency: str = Field(default="USD", max_length=3)
@@ -466,12 +466,12 @@ class SubscriptionService:
     @staticmethod
     def get_effective_plan(payment: "Payment") -> Dict:
         if not payment or not payment.pricing_plan:
-            return {"name": PlanName.FREE.value, "max_invitations": 3}
+            return {"name": PlanName.FREE.value, "max_invitations": 4}
 
         plan = payment.pricing_plan
         return {
             "name": plan.name,
-            "max_invitations": getattr(plan, "max_invitations", getattr(plan, "member_limit", 3)),
+            "max_invitations": getattr(plan, "max_invitations", getattr(plan, "member_limit", 4)),
             "duration_days": getattr(plan, "duration_days", 30),
             "is_active": plan.is_active,
         }
