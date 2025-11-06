@@ -17,7 +17,6 @@ from routes.timesheet import router as timesheet_router
 
 
 
-
 # =========================================
 # 🏁 Lifespan (DB initialization)
 # =========================================
