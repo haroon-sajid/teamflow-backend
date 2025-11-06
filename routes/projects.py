@@ -96,7 +96,7 @@ def get_project(
     
     # Map title to name for frontend compatibility
     project_data = ProjectRead.model_validate(project)
-    project_data.name = project.title  # ✅ Map title back to name
+    project_data.title = project.title
     return project_data
 
 # ==================================================================
@@ -128,7 +128,7 @@ def update_project(
         
         # Map title back to name for response
         project_data = ProjectRead.model_validate(project)
-        project_data.name = project.title  # ✅ Map title back to name
+        project_data.title = project.title
         return project_data
         
     except IntegrityError as e:
