@@ -7,6 +7,7 @@ alembic
 asyncpg
 psycopg2-binary
 sqlmodel
+argon2-cffi
 
 # Environment & security
 python-dotenv
