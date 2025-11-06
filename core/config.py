@@ -28,15 +28,15 @@ class Settings(BaseSettings):
     # ------------------------
     # FRONTEND & BACKEND CONFIG
     # ------------------------
-    # FRONTEND_URL: str = "https://teamflow-frontend-omega.vercel.app"
-    # BACKEND_URL: str = "https://teamflow-backend-1tt9.onrender.com"
+    FRONTEND_URL: str = "https://teamflow-frontend-omega.vercel.app"
+    BACKEND_URL: str = "https://teamflow-backend-1tt9.onrender.com"
 
 
     # -----------------------------------------
     # FRONTEND & BACKEND CONFI For LOCAL DEV
     # -----------------------------------------
-    FRONTEND_URL: str = "http://localhost:5173"
-    BACKEND_URL: str = "http://localhost:8000"
+    # FRONTEND_URL: str = "http://localhost:5173"
+    # BACKEND_URL: str = "http://localhost:8000"
 
 
     # ------------------------
