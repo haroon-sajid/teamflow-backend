@@ -57,7 +57,7 @@ app.include_router(auth_router, prefix="/auth", tags=["Authentication"])
 app.include_router(project_router, prefix="/projects", tags=["Projects"])
 app.include_router(tasks_router, prefix="/tasks", tags=["Tasks"])
 app.include_router(users_router, prefix="/users", tags=["Users"])       
-app.include_router(invitation_router, prefix="/auth", tags=["Invitations"])
+app.include_router(invitation_router, prefix="/invitations", tags=["Invitations"])
 app.include_router(profile_router, tags=["Profile"]) 
 app.include_router(payment_router)  # ✅ Stripe Payment Integration
 app.include_router(payment_router, prefix="/api/v1")
