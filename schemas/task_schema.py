@@ -3,6 +3,7 @@ from pydantic import BaseModel, Field, ConfigDict, validator
 from typing import Annotated, Optional, List
 from datetime import datetime
 
+
 class TaskCreate(BaseModel):
     title: str = Field(..., max_length=200)
     description: Optional[str] = Field(default=None, max_length=1000)

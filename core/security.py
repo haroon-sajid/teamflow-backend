@@ -19,7 +19,8 @@ import secrets
 # ========================================
 SECRET_KEY = settings.SECRET_KEY
 ALGORITHM = settings.ALGORITHM or "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = getattr(settings, "ACCESS_TOKEN_EXPIRE_MINUTES", 60 * 24)
+# ACCESS_TOKEN_EXPIRE_MINUTES = getattr(settings, "ACCESS_TOKEN_EXPIRE_MINUTES", 60 * 24)
+ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 days
 REFRESH_TOKEN_EXPIRE_DAYS = 7
 INVITATION_EXPIRE_HOURS = 48  # 2 days
 

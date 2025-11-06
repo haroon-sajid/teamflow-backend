@@ -13,6 +13,7 @@ from routes.invitation import router as invitation_router
 from routes.users import router as users_router      
 from routes.profile import router as profile_router 
 from routes.payment import router as payment_router
+from routes.timesheet import router as timesheet_router
 
 
 
@@ -20,14 +21,6 @@ from routes.payment import router as payment_router
 # =========================================
 # 🏁 Lifespan (DB initialization)
 # =========================================
-# @asynccontextmanager
-# async def lifespan(app: FastAPI):
-#     create_db_and_tables()
-#     print("✅ Database tables created on startup.")
-#     yield
-#     print("✅ Application shutting down.")
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Initialize database tables on startup
@@ -68,6 +61,9 @@ app.include_router(invitation_router, prefix="/auth", tags=["Invitations"])
 app.include_router(profile_router, tags=["Profile"]) 
 app.include_router(payment_router)  # ✅ Stripe Payment Integration
 app.include_router(payment_router, prefix="/api/v1")
+app.include_router(timesheet_router)
+
+
 
 # Serve the entire uploads directory at /static
 app.mount("/static", StaticFiles(directory="uploads"), name="static")
