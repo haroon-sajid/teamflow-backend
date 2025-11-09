@@ -1,9 +1,10 @@
 # routes/tasks.py
-from fastapi import APIRouter, HTTPException, Depends, status
-from sqlmodel import Session, select
-from typing import List, Optional
-from datetime import datetime
+from fastapi import APIRouter, HTTPException, Depends, status, Query
+from sqlmodel import Session, select, desc
+from typing import List, Optional, Dict
+from datetime import datetime, timedelta, date
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from sqlalchemy.orm import joinedload
 
 from core.database import get_session
 from models.models import (
@@ -60,7 +61,6 @@ def _check_task_access(session: Session, task: Task, current_user: User) -> bool
 # ================================================================
 #  ✅ Create New Task with Organization
 # ================================================================
-
 @router.post("/", response_model=TaskOut, status_code=201)
 def create_task(
     payload: TaskCreate,
@@ -87,11 +87,15 @@ def create_task(
         )
 
     # --- Create task ---
+    # ✅ Set start_date to current date if not provided
+    start_date = payload.start_date or datetime.utcnow()
+    
     task = Task(
         title=payload.title,
         description=payload.description,
         status=payload.status,
         priority=payload.priority,
+        start_date=start_date,  # ✅ NEW FIELD
         due_date=payload.due_date,
         project_id=payload.project_id,
         organization_id=current_user.organization_id,
@@ -137,7 +141,6 @@ def create_task(
 
         return TaskOut.from_orm(task)
 
-
     except IntegrityError:
         session.rollback()
         raise HTTPException(
@@ -150,7 +153,6 @@ def create_task(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="A database error occurred while creating the task."
         )
-
 
 # ================================================================
 #  ✅ Get All Tasks (Organization-scoped)
@@ -256,8 +258,7 @@ def get_task(
 # ================================================================
 #   ✅ Update Task
 # ================================================================
-
-# In tasks.py - FIXED update_task function
+# In tasks.py - Update the update_task function
 @router.put("/{task_id}", response_model=TaskOut)
 def update_task(
     task_id: int,
@@ -355,7 +356,6 @@ def update_task(
         )
     
     return TaskOut.model_validate(task)
-
 
 # ================================================================
 #   ✅ Delete Task
@@ -907,5 +907,185 @@ def search_tasks(
 
     return task_out_list
 
+
+
+
+
+
+
+
+
+# Add this to routes/tasks.py after the existing routes
+
 # ================================================================
-# ✅ END OF FILE
+# ✅ Get User Tasks with Time Logs and Weekly Aggregation
+# ================================================================
+@router.get("/user/{user_id}/task-logs", response_model=Dict)
+def get_user_task_logs_with_weekly_summary(
+    user_id: int,
+    weeks_back: Optional[int] = Query(12, description="Number of weeks to look back"),
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
+):
+    """
+    Get all tasks assigned to a user with time logs and weekly aggregation.
+    Returns tasks with details, time logs, and weekly total hours.
+    """
+    # Verify the target user exists and belongs to the same organization
+    target_user = session.exec(
+        select(User).where(
+            User.id == user_id,
+            User.organization_id == current_user.organization_id
+        )
+    ).first()
+    
+    if not target_user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found in organization"
+        )
+
+    # Check permissions - users can only view their own data unless they're admin
+    is_admin = current_user.role in [UserRole.ADMIN.value, UserRole.SUPER_ADMIN.value]
+    if not is_admin and current_user.id != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only view your own task logs"
+        )
+
+    # Get all tasks assigned to this user
+    assigned_tasks_query = (
+        select(Task)
+        .join(TaskMemberLink, TaskMemberLink.task_id == Task.id)
+        .join(Project, Project.id == Task.project_id)
+        .where(
+            TaskMemberLink.user_id == user_id,
+            Task.organization_id == current_user.organization_id
+        )
+        .options(joinedload(Task.project))
+    )
+    assigned_tasks = session.exec(assigned_tasks_query).all()
+
+    # Calculate date range for work logs (last X weeks)
+    end_date = datetime.utcnow()
+    start_date = end_date - timedelta(weeks=weeks_back)
+    
+    # Get all work logs for this user within the date range
+    work_logs_query = (
+        select(TaskWorkLog)
+        .join(Task, Task.id == TaskWorkLog.task_id)
+        .where(
+            TaskWorkLog.user_id == user_id,
+            TaskWorkLog.organization_id == current_user.organization_id,
+            TaskWorkLog.date >= start_date,
+            TaskWorkLog.date <= end_date
+        )
+        .order_by(desc(TaskWorkLog.date))
+    )
+    work_logs = session.exec(work_logs_query).all()
+
+    # Create task details mapping
+    task_details = {}
+    for task in assigned_tasks:
+        task_details[task.id] = {
+            "task_id": task.id,
+            "task_title": task.title,
+            "task_description": task.description,
+            "project_id": task.project_id,
+            "project_name": task.project.title if task.project else "Unknown Project",
+            "status": task.status,
+            "priority": task.priority,
+            "due_date": task.due_date,
+            "start_date": getattr(task, 'start_date', None),
+            "estimated_hours": getattr(task, 'estimated_hours', 0) or 0,
+            "time_logs": [],
+            "total_logged_hours": 0.0
+        }
+
+    # Group work logs by task and calculate totals
+    weekly_aggregation = {}
+    
+    for work_log in work_logs:
+        task_id = work_log.task_id
+        
+        # Skip if task is not in assigned tasks (shouldn't happen, but safety check)
+        if task_id not in task_details:
+            continue
+            
+        # Add time log to task
+        log_entry = {
+            "log_id": work_log.id,
+            "date": work_log.date.date() if isinstance(work_log.date, datetime) else work_log.date,
+            "hours": work_log.hours,
+            "description": work_log.description,
+            "logged_at": work_log.created_at if hasattr(work_log, 'created_at') else None
+        }
+        task_details[task_id]["time_logs"].append(log_entry)
+        task_details[task_id]["total_logged_hours"] += work_log.hours
+        
+        # Calculate weekly aggregation (Monday to Sunday)
+        log_date = work_log.date.date() if isinstance(work_log.date, datetime) else work_log.date
+        week_start, week_end = get_week_dates(log_date)
+        week_key = week_start.isoformat()
+        
+        if week_key not in weekly_aggregation:
+            weekly_aggregation[week_key] = {
+                "week_start": week_start,
+                "week_end": week_end,
+                "total_hours": 0.0,
+                "task_count": 0,
+                "log_count": 0
+            }
+        
+        weekly_aggregation[week_key]["total_hours"] += work_log.hours
+        weekly_aggregation[week_key]["log_count"] += 1
+
+    # Count tasks per week
+    for week_data in weekly_aggregation.values():
+        week_tasks = set()
+        for task_id, task_data in task_details.items():
+            for log in task_data["time_logs"]:
+                log_date = log["date"]
+                week_start, week_end = get_week_dates(log_date)
+                if week_data["week_start"] == week_start:
+                    week_tasks.add(task_id)
+        week_data["task_count"] = len(week_tasks)
+
+    # Convert task_details to list and sort by total logged hours (descending)
+    tasks_list = list(task_details.values())
+    tasks_list.sort(key=lambda x: x["total_logged_hours"], reverse=True)
+    
+    # Sort weekly aggregation by week (descending)
+    sorted_weekly = dict(sorted(
+        weekly_aggregation.items(), 
+        key=lambda x: x[1]["week_start"], 
+        reverse=True
+    ))
+
+    return {
+        "user_id": user_id,
+        "user_name": target_user.full_name,
+        "user_email": target_user.email,
+        "date_range": {
+            "start_date": start_date.date().isoformat(),
+            "end_date": end_date.date().isoformat(),
+            "weeks_back": weeks_back
+        },
+        "summary": {
+            "total_tasks": len(assigned_tasks),
+            "total_logged_hours": sum(task["total_logged_hours"] for task in tasks_list),
+            "total_work_logs": len(work_logs),
+            "weeks_with_data": len(weekly_aggregation)
+        },
+        "tasks": tasks_list,
+        "weekly_aggregation": sorted_weekly
+    }
+
+
+# Helper function for week calculations (add this at the top with other helpers if not exists)
+def get_week_dates(target_date: date) -> tuple[date, date]:
+    """Get week start (Monday) and end (Sunday) for a given date"""
+    weekday = target_date.weekday()  # Monday=0, Sunday=6
+    week_start = target_date - timedelta(days=weekday)
+    week_end = week_start + timedelta(days=6)  # Sunday
+    return week_start, week_end

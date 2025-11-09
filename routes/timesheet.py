@@ -561,18 +561,37 @@ def get_daily_tasks(
 
 
 
+# In timesheet.py - Update the is_task_active_on_date function
+def is_task_active_on_date(task, target_date):
+    """
+    Check if a task should be displayed on a specific date based on start_date and due_date
+    """
+    # Use start_date if available (new field), otherwise fall back to assigned_date/created_at
+    start_date = getattr(task, 'start_date', None)
+    if not start_date:
+        assigned_date = getattr(task, 'assigned_date', None)
+        if not assigned_date and hasattr(task, 'created_at'):
+            assigned_date = task.created_at.date() if task.created_at else None
+        start_date = assigned_date
+    
+    # If still no start_date, show task for all dates (fallback)
+    if not start_date:
+        return True
+    
+    # Handle date conversions
+    start_date = start_date.date() if isinstance(start_date, datetime) else start_date
+    target_date = target_date.date() if isinstance(target_date, datetime) else target_date
+    
+    # Check if target_date is within start_date and due_date range
+    if task.due_date:
+        due_date = task.due_date.date() if isinstance(task.due_date, datetime) else task.due_date
+        return start_date <= target_date <= due_date
+    
+    # If no due_date, only show from start_date onwards
+    return target_date >= start_date
 
 
-
-
-
-
-
-
-
-
-
-# Add to routes/timesheet.py
+# Now update the get_filtered_user_tasks route in routes/timesheet.py:
 @router.get("/filtered-tasks", response_model=UserTaskWeekResponse)
 def get_filtered_user_tasks(
     user_id: Optional[int] = Query(None, description="User ID to filter by"),
@@ -582,7 +601,7 @@ def get_filtered_user_tasks(
     session: Session = Depends(get_session)
 ):
     """
-    Get tasks for user with proper date filtering - only current and past dates show tasks
+    Get tasks for user with proper date filtering - tasks appear from assigned_date to due_date
     """
     from datetime import datetime
     
@@ -606,7 +625,7 @@ def get_filtered_user_tasks(
     if not user:
         raise HTTPException(status_code=404, detail="User not found in organization")
     
-    # Get current date for filtering
+    # Get current date for filtering future dates
     current_date = datetime.utcnow().date()
     
     # Get all tasks assigned to this user
@@ -638,7 +657,7 @@ def get_filtered_user_tasks(
     
     work_logs = session.exec(work_logs_query).all()
     
-    # Structure response by day with proper filtering
+    # Structure response by day with proper date range filtering
     daily_tasks = {}
     daily_totals = {}
     
@@ -648,37 +667,35 @@ def get_filtered_user_tasks(
         daily_tasks[current_day_date] = []
         daily_totals[current_day_date] = 0.0
         
-        # Only populate tasks for current and past dates
-        if current_day_date <= current_date:
-            # Get work logs for this specific day
-            day_work_logs = [wl for wl in work_logs if wl.date.date() == current_day_date]
-            
-            # Group work logs by task for this day
-            task_hours = {}
-            for work_log in day_work_logs:
-                if work_log.task_id not in task_hours:
-                    task_hours[work_log.task_id] = 0.0
-                task_hours[work_log.task_id] += work_log.hours
-            
-            # Create task entries for this day
-            for task in tasks:
-                # Only show task if it has work logs or it's assigned to user
-                if task.id in task_hours or current_day_date == current_date:
-                    task_data = UserTaskDay(
-                        task_id=task.id,
-                        task_title=task.title,
-                        task_description=task.description,
-                        project_id=task.project_id,
-                        project_name=task.project.title if task.project else None,
-                        status=task.status,
-                        priority=task.priority,
-                        due_date=task.due_date,
-                        estimated_hours=0.0,
-                        logged_hours=task_hours.get(task.id, 0.0),
-                        is_completed=task.status.lower() in ['done', 'completed', 'closed']
-                    )
-                    daily_tasks[current_day_date].append(task_data)
-                    daily_totals[current_day_date] += task_hours.get(task.id, 0.0)
+        # For each day, determine which tasks should be displayed
+        for task in tasks:
+            # Check if task should be active on this date based on assigned_date and due_date
+            if is_task_active_on_date(task, current_day_date):
+                # Get work logs for this specific day and task
+                day_task_work_logs = [
+                    wl for wl in work_logs 
+                    if wl.date.date() == current_day_date and wl.task_id == task.id
+                ]
+                
+                # Calculate total hours for this task on this day
+                task_hours = sum(wl.hours for wl in day_task_work_logs)
+                
+                task_data = UserTaskDay(
+                    task_id=task.id,
+                    task_title=task.title,
+                    task_description=task.description,
+                    project_id=task.project_id,
+                    project_name=task.project.title if task.project else None,
+                    status=task.status,
+                    priority=task.priority,
+                    due_date=task.due_date,
+                    estimated_hours=task.estimated_hours if hasattr(task, 'estimated_hours') else 0.0,
+                    logged_hours=task_hours,
+                    is_completed=task.status.lower() in ['done', 'completed', 'closed']
+                )
+                
+                daily_tasks[current_day_date].append(task_data)
+                daily_totals[current_day_date] += task_hours
     
     # Calculate week total
     week_total_hours = sum(daily_totals.values())
@@ -696,3 +713,107 @@ def get_filtered_user_tasks(
     )
     
     return response
+
+
+
+
+@router.get("/worklogs/employee-summary")
+def getWorklogsSummary(
+    user_id: Optional[int] = Query(None, description="User ID to filter by"),
+    week_start: Optional[date] = Query(None, description="Week start date (Monday)"),
+    organization_id: int = Query(..., description="Organization ID"),
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
+):
+    """
+    Get worklogs summary for specific employee with TWH and TTT calculations
+    """
+    from datetime import datetime
+    
+    # Calculate week dates
+    if not week_start:
+        week_start, week_end = get_current_week_dates()
+    else:
+        week_start, week_end = get_week_dates(week_start)
+    
+    # Determine which user to query
+    target_user_id = user_id if user_id else current_user.id
+    
+    # Verify user exists and belongs to organization
+    user = session.exec(
+        select(User).where(
+            User.id == target_user_id,
+            User.organization_id == organization_id
+        )
+    ).first()
+    
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found in organization")
+    
+    # Convert to datetime for query
+    start_datetime = datetime.combine(week_start, datetime.min.time())
+    end_datetime = datetime.combine(week_end, datetime.max.time())
+    
+    # Get TWH - Total Weekly Hours (sum of all work logs in the week)
+    twh_query = (
+        select(func.sum(TaskWorkLog.hours))
+        .join(Task, Task.id == TaskWorkLog.task_id)
+        .where(
+            TaskWorkLog.user_id == target_user_id,
+            TaskWorkLog.organization_id == organization_id,
+            TaskWorkLog.date >= start_datetime,
+            TaskWorkLog.date <= end_datetime
+        )
+    )
+    total_weekly_hours = session.exec(twh_query).first() or 0.0
+    
+    # Get TTT - Today's Task Time (current day only for this user)
+    today = datetime.utcnow().date()
+    today_start = datetime.combine(today, datetime.min.time())
+    today_end = datetime.combine(today, datetime.max.time())
+    
+    ttt_query = (
+        select(func.sum(TaskWorkLog.hours))
+        .join(Task, Task.id == TaskWorkLog.task_id)
+        .where(
+            TaskWorkLog.user_id == target_user_id,
+            TaskWorkLog.organization_id == organization_id,
+            TaskWorkLog.date >= today_start,
+            TaskWorkLog.date <= today_end
+        )
+    )
+    todays_task_time = session.exec(ttt_query).first() or 0.0
+    
+    # Get daily breakdown for the week
+    daily_breakdown_query = (
+        select(
+            func.date(TaskWorkLog.date).label("work_date"),
+            func.sum(TaskWorkLog.hours).label("daily_hours")
+        )
+        .join(Task, Task.id == TaskWorkLog.task_id)
+        .where(
+            TaskWorkLog.user_id == target_user_id,
+            TaskWorkLog.organization_id == organization_id,
+            TaskWorkLog.date >= start_datetime,
+            TaskWorkLog.date <= end_datetime
+        )
+        .group_by(func.date(TaskWorkLog.date))
+    )
+    
+    daily_results = session.exec(daily_breakdown_query).all()
+    daily_breakdown = {str(result.work_date): float(result.daily_hours) for result in daily_results}
+    
+    return {
+        "user_id": user.id,
+        "user_name": user.full_name,
+        "total_work_hours": float(total_weekly_hours),  # TWH
+        "total_task_time": float(todays_task_time),     # TTT
+        "week_start": week_start.isoformat(),
+        "week_end": week_end.isoformat(),
+        "daily_breakdown": daily_breakdown
+    }
+
+
+
+
+

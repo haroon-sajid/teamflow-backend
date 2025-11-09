@@ -9,10 +9,11 @@ class TaskCreate(BaseModel):
     description: Optional[str] = Field(default=None, max_length=1000)
     status: str = Field(default="Open", max_length=20)
     priority: str = Field(default="medium", max_length=20)
+    start_date: Optional[datetime] = None  # ✅ NEW FIELD
     due_date: Optional[datetime] = None
     project_id: int
     allow_member_edit: bool = Field(default=False)
-    member_ids: Optional[List[int]] = Field(default=[])  # ✅ FIXED: Default empty list
+    member_ids: Optional[List[int]] = Field(default=[])
 
     @validator('member_ids', pre=True)
     def validate_member_ids(cls, v):
@@ -27,14 +28,15 @@ class TaskRead(BaseModel):
     description: Optional[str] = Field(default=None, max_length=1000)
     status: str = Field(..., max_length=20)
     priority: str = Field(..., max_length=20)
+    start_date: Optional[datetime] = None  # ✅ NEW FIELD
     due_date: Optional[datetime] = None
     project_id: int
-    project_name: Optional[str] = None     # ✅ Added field
+    project_name: Optional[str] = None
     created_at: datetime
     allow_member_edit: bool = Field(default=False)
     organization_id: Optional[int] = None
-    member_ids: List[int] = Field(default=[])  # ✅ Always a list
-    member_names: List[str] = Field(default=[])  # ✅ ADDED: For search results
+    member_ids: List[int] = Field(default=[])
+    member_names: List[str] = Field(default=[])
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -44,16 +46,38 @@ class TaskUpdate(BaseModel):
     description: Optional[str] = Field(default=None, max_length=1000)
     status: Optional[str] = Field(default=None, max_length=20)
     priority: Optional[str] = Field(default=None, max_length=20)
+    start_date: Optional[datetime] = None  # ✅ NEW FIELD
     due_date: Optional[datetime] = None
     project_id: Optional[int] = None
     allow_member_edit: Optional[bool] = None
-    member_ids: Optional[List[int]] = Field(default=[])  # ✅ FIXED: Default empty list
+    member_ids: Optional[List[int]] = Field(default=[])
 
     @validator('member_ids', pre=True)
     def validate_member_ids(cls, v):
         if v is None:
             return []
         return v
+
+
+# Also update TaskOut schema for search results
+class TaskOut(BaseModel):
+    id: int
+    title: str = Field(..., max_length=200)
+    description: Optional[str] = Field(default=None, max_length=1000)
+    status: str = Field(..., max_length=20)
+    priority: str = Field(..., max_length=20)
+    start_date: Optional[datetime] = None  # ✅ NEW FIELD
+    due_date: Optional[datetime] = None
+    project_id: int
+    project_name: Optional[str] = None
+    created_at: datetime
+    allow_member_edit: bool = Field(default=False)
+    organization_id: Optional[int] = None
+    member_ids: List[int] = Field(default=[])
+    member_names: List[str] = Field(default=[])
+
+    model_config = ConfigDict(from_attributes=True)
+
 
 
 # Comments
@@ -165,25 +189,6 @@ class TaskWorkLogUpdate(BaseModel):
     hours: Optional[float] = Field(default=None, gt=0)
     description: Optional[str] = Field(default=None, max_length=500)
     date: Optional[datetime] = None
-
-
-# Add this schema specifically for search results
-class TaskOut(BaseModel):
-    id: int
-    title: str = Field(..., max_length=200)
-    description: Optional[str] = Field(default=None, max_length=1000)
-    status: str = Field(..., max_length=20)
-    priority: str = Field(..., max_length=20)
-    due_date: Optional[datetime] = None
-    project_id: int
-    project_name: Optional[str] = None
-    created_at: datetime
-    allow_member_edit: bool = Field(default=False)
-    organization_id: Optional[int] = None
-    member_ids: List[int] = Field(default=[])
-    member_names: List[str] = Field(default=[])  # ✅ ADDED: Member names for display
-
-    model_config = ConfigDict(from_attributes=True)
 
 
 # Add this search schemas

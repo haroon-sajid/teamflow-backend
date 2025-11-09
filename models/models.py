@@ -245,6 +245,7 @@ class Task(SQLModel, table=True):
     description: Optional[str] = Field(max_length=1000, default=None)
     status: str = Field(default="Open", max_length=20)
     priority: str = Field(default="medium", max_length=20)
+    start_date: Optional[datetime] = None  # ✅ NEW FIELD
     due_date: Optional[datetime] = None
     project_id: int = Field(foreign_key="project.id")
     created_at: datetime = Field(default_factory=datetime.utcnow)
@@ -253,14 +254,13 @@ class Task(SQLModel, table=True):
     # Tenant scoping
     organization_id: Optional[int] = Field(default=None, foreign_key="organization.id", index=True)
 
-    # Relationships
+    # Relationships (unchanged)
     project: "Project" = Relationship(back_populates="tasks")
     members: List["User"] = Relationship(back_populates="tasks", link_model=TaskMemberLink)
     comments: List["TaskComment"] = Relationship(back_populates="task")
     work_logs: List["TaskWorkLog"] = Relationship(back_populates="task")
     timesheets: List["Timesheet"] = Relationship(back_populates="task")
     organization: Optional["Organization"] = Relationship(back_populates="tasks")
-
 
 # ============================================================
 # TASK COMMENT
